@@ -1,9 +1,12 @@
 #include <Arduino.h>
 
 #include "Application.h"
+#include "NetworkService.h"
 
 namespace {
-Application application;
+NetworkService network;
+LogOutput logOutput(network);
+Application application(logOutput);
 }
 
 void setup() {
@@ -16,11 +19,12 @@ void setup() {
     delay(10);
   }
 
+  network.begin();
   application.begin();
 }
 
 void loop() {
+  network.update();
   application.update(millis());
   delay(1);
 }
-

@@ -7,9 +7,9 @@ void Application::begin() {
   mode_ = OperatingMode::Disabled;
   state_ = ApplicationState::Disabled;
 
-  Serial.println();
-  Serial.println("LTW8 Heat Pilot");
-  Serial.println("Firmware started; all outputs are OFF.");
+  log_.println();
+  log_.println("LTW8 Heat Pilot");
+  log_.println("Firmware started; all outputs are OFF.");
   printStatus(millis());
 }
 
@@ -25,7 +25,7 @@ void Application::setAllOutputsOff() {
 }
 
 void Application::printStatus(const uint32_t nowMs) const {
-  Serial.printf(
+  log_.printf(
       "[status] uptime_ms=%lu mode=%s state=%s heater=%u%u%u pump=%u\n",
       static_cast<unsigned long>(nowMs), toString(mode_), toString(state_),
       outputs_.heaterPhase1, outputs_.heaterPhase2, outputs_.heaterPhase3,
@@ -57,4 +57,3 @@ const char* Application::toString(const ApplicationState state) {
   }
   return "unknown";
 }
-

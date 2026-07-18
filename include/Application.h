@@ -24,6 +24,8 @@ struct OutputState {
 
 class Application {
  public:
+  explicit Application(Print& log) : log_(log) {}
+
   void begin();
   void update(uint32_t nowMs);
 
@@ -39,5 +41,5 @@ class Application {
   ApplicationState state_ = ApplicationState::Starting;
   OutputState outputs_{};
   uint32_t lastStatusAtMs_ = 0;
+  Print& log_;
 };
-
