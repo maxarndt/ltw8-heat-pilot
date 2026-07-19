@@ -8,6 +8,7 @@ class NetworkService {
   void begin();
   void update();
   size_t write(const uint8_t* buffer, size_t size);
+  bool online() const { return ethernetOnline_; }
 
  private:
   void handleEvent(arduino_event_id_t event, arduino_event_info_t info);
@@ -30,4 +31,3 @@ class LogOutput : public Print {
  private:
   NetworkService& network_;
 };
-

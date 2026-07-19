@@ -1,12 +1,16 @@
 #include <Arduino.h>
 
 #include "Application.h"
+#include "HttpApi.h"
 #include "NetworkService.h"
+#include "OutputController.h"
 
 namespace {
 NetworkService network;
 LogOutput logOutput(network);
-Application application(logOutput);
+OutputController outputs;
+Application application(logOutput, outputs);
+HttpApi httpApi(application, logOutput);
 }
 
 void setup() {
@@ -19,12 +23,13 @@ void setup() {
     delay(10);
   }
 
-  network.begin();
   application.begin();
+  network.begin();
 }
 
 void loop() {
   network.update();
   application.update(millis());
+  httpApi.update(network.online());
   delay(1);
 }

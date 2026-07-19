@@ -5,9 +5,9 @@ the Arduino framework.
 
 ## Current state
 
-The firmware starts in `disabled` mode, keeps all logical outputs off, and
+The firmware starts in `disabled` mode, keeps all physical outputs off, and
 reports its state every two seconds. Logs are available over native USB and,
-after DHCP succeeds, over TCP. Physical output control is not implemented yet.
+after DHCP succeeds, over TCP.
 
 ## Build
 
@@ -37,7 +37,7 @@ The monitor uses 115200 baud. Expected output:
 ```text
 LTW8 Heat Pilot
 Firmware started; all outputs are OFF.
-[status] uptime_ms=1500 mode=disabled state=disabled heater=000 pump=0
+[status] uptime_ms=1500 mode=disabled state=disabled heater_phases=0 pump=0 outputs_healthy=1 manual_timeout_ms=0
 ```
 
 ## Ethernet and network log
@@ -64,3 +64,47 @@ pio run -e waveshare_esp32_s3_ota --target upload
 The current development password is `heat-pilot-dev`. Change it in both
 `include/Config.h` and `platformio.ini` before permanent deployment. USB upload
 remains available as a recovery path.
+
+## REST API
+
+Read the current state:
+
+```sh
+curl http://heat-pilot.local/api/v1/status
+```
+
+Set the manual outputs (heater phases 0 to 3, pump true or false):
+
+```sh
+curl -X PUT http://heat-pilot.local/api/v1/manual-output \
+  -H 'Content-Type: application/json' \
+  -d '{"heater_phases":2,"pump":true}'
+```
+
+The three heater phases map to DO1 through DO3 and are enabled in order. The
+pump maps to DO4. The pump is mandatory while a heater phase is active. Sending
+zero phases and `pump: false` switches the heater off and starts the 90-second
+pump overrun. Any active manual command times out after 60 seconds.
+The API is currently intended only for testing on a trusted local network and
+does not yet require authentication.
+
+Set simulated measurements (positive surplus means exported power):
+
+```sh
+curl -X PUT http://heat-pilot.local/api/v1/simulation \
+  -H 'Content-Type: application/json' \
+  -d '{"surplus_w":5000,"temperature_c":60.0}'
+```
+
+Enable automatic mode:
+
+```sh
+curl -X PUT http://heat-pilot.local/api/v1/mode \
+  -H 'Content-Type: application/json' \
+  -d '{"mode":"automatic"}'
+```
+
+Control constants are collected in `include/Config.h`: each heater phase is
+1500 W, a phase needs 1700 W to switch on and drops below 1300 W, and a new
+condition must remain stable for 30 seconds. The target temperature is 80 C;
+heating is released again at 76 C. The pump overruns for 90 seconds.
