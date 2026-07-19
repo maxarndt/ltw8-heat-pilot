@@ -2,10 +2,7 @@
 
 #include <Arduino.h>
 
-struct OutputState {
-  uint8_t heaterPhases = 0;
-  bool circulationPump = false;
-};
+#include "ControlTypes.h"
 
 class OutputController {
  public:
@@ -25,4 +22,3 @@ class OutputController {
   OutputState state_{};
   bool healthy_ = false;
 };
-

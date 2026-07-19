@@ -3,6 +3,7 @@
 #include <Wire.h>
 
 #include "Config.h"
+#include "OutputEncoding.h"
 
 bool OutputController::begin() {
   Wire.begin(config::outputs::kSdaPin, config::outputs::kSclPin);
@@ -27,11 +28,8 @@ bool OutputController::set(const uint8_t heaterPhases,
     return false;
   }
 
-  const uint8_t heaterMask =
-      heaterPhases == 0 ? 0 : static_cast<uint8_t>((1U << heaterPhases) - 1U);
-  const uint8_t pumpMask = circulationPump ? (1U << 3) : 0;
-  const uint8_t activeOutputs = heaterMask | pumpMask;
-  const uint8_t outputLevels = static_cast<uint8_t>(~activeOutputs);
+  const OutputState requested{heaterPhases, circulationPump};
+  const uint8_t outputLevels = encodeOutputLevels(requested);
 
   if (!writeRegister(kOutputRegister, outputLevels)) {
     healthy_ = false;
@@ -39,8 +37,7 @@ bool OutputController::set(const uint8_t heaterPhases,
     return false;
   }
 
-  state_.heaterPhases = heaterPhases;
-  state_.circulationPump = circulationPump;
+  state_ = requested;
   return true;
 }
 

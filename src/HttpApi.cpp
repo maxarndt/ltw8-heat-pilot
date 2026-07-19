@@ -2,6 +2,7 @@
 
 #include <ArduinoJson.h>
 
+#include "ApiValidation.h"
 #include "Application.h"
 
 void HttpApi::update(const bool networkOnline) {
@@ -66,14 +67,16 @@ void HttpApi::handleManualOutput() {
   }
 
   const int heaterPhases = request["heater_phases"].as<int>();
-  if (heaterPhases < 0 || heaterPhases > 3) {
+  const bool pump = request["pump"].as<bool>();
+  const ManualOutputValidation validation =
+      validateManualOutput(heaterPhases, pump);
+  if (validation == ManualOutputValidation::InvalidPhaseCount) {
     sendError(422, "invalid_heater_phases",
               "heater_phases must be between 0 and 3");
     return;
   }
 
-  const bool pump = request["pump"].as<bool>();
-  if (heaterPhases > 0 && !pump) {
+  if (validation == ManualOutputValidation::PumpRequired) {
     sendError(422, "pump_interlock",
               "pump must be true while heater phases are active");
     return;
@@ -132,7 +135,7 @@ void HttpApi::handleSimulation() {
 
   const int32_t surplusW = request["surplus_w"].as<int32_t>();
   const float temperatureC = request["temperature_c"].as<float>();
-  if (temperatureC < -55.0F || temperatureC > 125.0F) {
+  if (!isValidTemperature(temperatureC)) {
     sendError(422, "invalid_temperature",
               "temperature_c must be between -55 and 125");
     return;

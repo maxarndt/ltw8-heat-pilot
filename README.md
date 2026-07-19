@@ -15,6 +15,18 @@ after DHCP succeeds, over TCP.
 pio run
 ```
 
+## Tests
+
+Run the hardware-independent control, timing, interlock, output encoding, and
+API validation tests on the development machine:
+
+```sh
+pio test -e native
+```
+
+The tests use simulated timestamps and therefore verify 30, 60, and 90 second
+behavior without real waiting or a connected board.
+
 ## Upload
 
 Connect the board through its USB-C port and run:
