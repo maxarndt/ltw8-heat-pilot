@@ -1,5 +1,7 @@
 #include <stdint.h>
 
+#include <limits>
+
 #include <unity.h>
 
 #include "ApiValidation.h"
@@ -103,6 +105,21 @@ void test_phases_are_removed_one_at_a_time() {
   assertOutputs(engine, 0, true);
 }
 
+void test_automatic_never_exceeds_three_phases() {
+  ControlEngine engine = automaticEngine(100000);
+  engine.update(0);
+  engine.update(30000);
+  engine.update(30001);
+  engine.update(60001);
+  engine.update(60002);
+  engine.update(90002);
+  assertOutputs(engine, 3, true);
+
+  engine.update(90003);
+  engine.update(200000);
+  assertOutputs(engine, 3, true);
+}
+
 void test_disable_threshold_is_strict_and_stable() {
   ControlEngine engine = automaticEngine(1700);
   engine.update(0);
@@ -186,6 +203,22 @@ void test_manual_heater_timeout_starts_pump_overrun() {
   assertOutputs(engine, 0, false);
 }
 
+void test_manual_off_command_starts_pump_overrun() {
+  ControlEngine engine;
+  engine.begin();
+  TEST_ASSERT_TRUE(engine.setManualOutput(3, true, 0));
+
+  TEST_ASSERT_TRUE(engine.setManualOutput(0, false, 100));
+  assertOutputs(engine, 0, true);
+  const ControlSnapshot status = engine.snapshot(100);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(OperatingMode::Disabled),
+                        static_cast<int>(status.mode));
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ApplicationState::PumpOverrun),
+                        static_cast<int>(status.state));
+  TEST_ASSERT_EQUAL_UINT32(config::control::kPumpOverrunMs,
+                           status.pumpOverrunRemainingMs);
+}
+
 void test_manual_pump_only_timeout_stops_without_overrun() {
   ControlEngine engine;
   engine.begin();
@@ -260,6 +293,12 @@ void test_temperature_api_validation() {
   TEST_ASSERT_TRUE(isValidTemperature(125.0F));
   TEST_ASSERT_FALSE(isValidTemperature(-55.1F));
   TEST_ASSERT_FALSE(isValidTemperature(125.1F));
+  TEST_ASSERT_FALSE(
+      isValidTemperature(std::numeric_limits<float>::quiet_NaN()));
+  TEST_ASSERT_FALSE(
+      isValidTemperature(std::numeric_limits<float>::infinity()));
+  TEST_ASSERT_FALSE(
+      isValidTemperature(-std::numeric_limits<float>::infinity()));
 }
 
 }  // namespace
@@ -272,11 +311,13 @@ int main() {
   RUN_TEST(test_phases_are_added_one_at_a_time);
   RUN_TEST(test_unstable_surplus_restarts_phase_timer);
   RUN_TEST(test_phases_are_removed_one_at_a_time);
+  RUN_TEST(test_automatic_never_exceeds_three_phases);
   RUN_TEST(test_disable_threshold_is_strict_and_stable);
   RUN_TEST(test_target_temperature_stops_heater_and_overruns_pump);
   RUN_TEST(test_temperature_hysteresis_releases_at_76_degrees);
   RUN_TEST(test_manual_interlock_rejects_heater_without_pump);
   RUN_TEST(test_manual_heater_timeout_starts_pump_overrun);
+  RUN_TEST(test_manual_off_command_starts_pump_overrun);
   RUN_TEST(test_manual_pump_only_timeout_stops_without_overrun);
   RUN_TEST(test_disabling_active_heater_keeps_pump_running);
   RUN_TEST(test_timeouts_work_across_millis_wraparound);
