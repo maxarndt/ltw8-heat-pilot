@@ -17,6 +17,8 @@ enum class ApplicationState : uint8_t {
   PumpOverrun,
   TemperatureHold,
   WaitingForData,
+  WaitingForTemperature,
+  TemperatureFault,
   Fault,
 };
 
@@ -42,7 +44,8 @@ struct ControlSnapshot {
   uint32_t pumpOverrunRemainingMs;
   uint32_t phaseChangeRemainingMs;
   bool measurementsValid;
+  bool temperatureValid;
+  bool temperatureFault;
   int32_t surplusW;
   float temperatureC;
 };
-

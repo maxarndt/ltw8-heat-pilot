@@ -21,6 +21,9 @@ constexpr uint32_t kPhaseChangeStableMs = 30000;
 constexpr uint32_t kPumpOverrunMs = 90000;
 constexpr float kTargetTemperatureC = 80.0F;
 constexpr float kTemperatureHysteresisC = 4.0F;
+constexpr uint32_t kTemperatureStaleMs = 15000;
+constexpr uint32_t kTemperatureFaultDelayMs = 15000;
+constexpr uint8_t kTemperatureRecoverySamples = 2;
 }  // namespace control
 
 namespace outputs {
@@ -28,6 +31,14 @@ constexpr uint8_t kI2cAddress = 0x20;
 constexpr int8_t kSdaPin = 42;
 constexpr int8_t kSclPin = 41;
 }  // namespace outputs
+
+namespace temperature {
+constexpr int8_t kOneWirePin = 1;
+constexpr uint8_t kResolutionBits = 12;
+constexpr uint8_t kMaximumSensors = 8;
+constexpr uint32_t kConversionTimeMs = 750;
+constexpr uint32_t kMeasurementIntervalMs = 5000;
+}  // namespace temperature
 
 namespace ethernet {
 constexpr int8_t kInterruptPin = 12;

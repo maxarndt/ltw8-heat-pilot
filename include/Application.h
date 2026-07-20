@@ -4,6 +4,7 @@
 
 #include "ControlEngine.h"
 #include "OutputController.h"
+#include "TemperatureService.h"
 
 struct ApplicationStatus {
   uint32_t uptimeMs;
@@ -15,32 +16,43 @@ struct ApplicationStatus {
   uint32_t pumpOverrunRemainingMs;
   uint32_t phaseChangeRemainingMs;
   bool measurementsValid;
+  bool temperatureValid;
+  bool temperatureFault;
   int32_t surplusW;
   float temperatureC;
 };
 
 class Application {
  public:
-  Application(Print& log, OutputController& outputs)
-      : log_(log), outputs_(outputs) {}
+  Application(Print& log, OutputController& outputs,
+              TemperatureService& temperatures)
+      : log_(log), outputs_(outputs), temperatures_(temperatures) {}
 
   void begin();
   void update(uint32_t nowMs);
   bool setManualOutput(uint8_t heaterPhases, bool pump, uint32_t nowMs);
   bool setOperatingMode(OperatingMode mode, uint32_t nowMs);
-  void setSimulatedMeasurements(int32_t surplusW, float temperatureC);
+  void setSimulatedSurplus(int32_t surplusW);
   ApplicationStatus status(uint32_t nowMs) const;
+  uint8_t temperatureSensorCount() const { return temperatures_.count(); }
+  const TemperatureSensorReading& temperatureSensor(uint8_t index) const {
+    return temperatures_.reading(index);
+  }
 
  private:
   static constexpr uint32_t kStatusIntervalMs = 2000;
 
   bool syncOutputs();
+  void updateTemperatureMeasurement(uint32_t nowMs);
   void printStatus(uint32_t nowMs) const;
   static const char* toString(OperatingMode mode);
   static const char* toString(ApplicationState state);
 
   uint32_t lastStatusAtMs_ = 0;
+  uint32_t lastTemperatureMeasurementAtMs_ = 0;
+  bool temperatureStaleReported_ = false;
   Print& log_;
   OutputController& outputs_;
+  TemperatureService& temperatures_;
   ControlEngine control_{};
 };

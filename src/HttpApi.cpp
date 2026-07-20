@@ -44,8 +44,30 @@ void HttpApi::handleStatus() {
   response["pump_overrun_remaining_ms"] = status.pumpOverrunRemainingMs;
   response["phase_change_remaining_ms"] = status.phaseChangeRemainingMs;
   response["measurements_valid"] = status.measurementsValid;
+  response["temperature_valid"] = status.temperatureValid;
+  response["temperature_fault"] = status.temperatureFault;
   response["surplus_w"] = status.surplusW;
   response["temperature_c"] = status.temperatureC;
+
+  JsonArray temperatureSensors =
+      response["temperature_sensors"].to<JsonArray>();
+  for (uint8_t index = 0; index < application_.temperatureSensorCount();
+       ++index) {
+    const TemperatureSensorReading& reading =
+        application_.temperatureSensor(index);
+    JsonObject sensor = temperatureSensors.add<JsonObject>();
+    char address[17];
+    TemperatureService::formatAddress(reading.address, address,
+                                      sizeof(address));
+    sensor["address"] = address;
+    sensor["valid"] = reading.valid;
+    sensor["measured_at_ms"] = reading.measuredAtMs;
+    if (reading.valid) {
+      sensor["temperature_c"] = reading.temperatureC;
+    } else {
+      sensor["temperature_c"] = nullptr;
+    }
+  }
 
   String body;
   serializeJson(response, body);
@@ -79,6 +101,11 @@ void HttpApi::handleManualOutput() {
   if (validation == ManualOutputValidation::PumpRequired) {
     sendError(422, "pump_interlock",
               "pump must be true while heater phases are active");
+    return;
+  }
+  if (heaterPhases > 0 && !application_.status(millis()).temperatureValid) {
+    sendError(409, "temperature_unavailable",
+              "heater requires valid temperature measurements");
     return;
   }
   if (!application_.setManualOutput(static_cast<uint8_t>(heaterPhases), pump,
@@ -126,24 +153,14 @@ void HttpApi::handleSimulation() {
     sendError(400, "invalid_json", "Request body must be valid JSON");
     return;
   }
-  if (!request["surplus_w"].is<int>() ||
-      !request["temperature_c"].is<float>()) {
-    sendError(400, "invalid_request",
-              "surplus_w must be an integer and temperature_c a number");
+  if (!request["surplus_w"].is<int>()) {
+    sendError(400, "invalid_request", "surplus_w must be an integer");
     return;
   }
 
   const int32_t surplusW = request["surplus_w"].as<int32_t>();
-  const float temperatureC = request["temperature_c"].as<float>();
-  if (!isValidTemperature(temperatureC)) {
-    sendError(422, "invalid_temperature",
-              "temperature_c must be between -55 and 125");
-    return;
-  }
-
-  application_.setSimulatedMeasurements(surplusW, temperatureC);
-  log_.printf("[simulation] surplus_w=%ld temperature_c=%.1f\n",
-              static_cast<long>(surplusW), temperatureC);
+  application_.setSimulatedSurplus(surplusW);
+  log_.printf("[simulation] surplus_w=%ld\n", static_cast<long>(surplusW));
   handleStatus();
 }
 

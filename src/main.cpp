@@ -4,12 +4,14 @@
 #include "HttpApi.h"
 #include "NetworkService.h"
 #include "OutputController.h"
+#include "TemperatureService.h"
 
 namespace {
 NetworkService network;
 LogOutput logOutput(network);
 OutputController outputs;
-Application application(logOutput, outputs);
+TemperatureService temperatures(logOutput);
+Application application(logOutput, outputs, temperatures);
 HttpApi httpApi(application, logOutput);
 }
 

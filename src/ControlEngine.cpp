@@ -14,7 +14,14 @@ void ControlEngine::begin() {
   phaseCandidate_ = 0;
   phaseCandidateSinceMs_ = 0;
   temperatureLockout_ = false;
-  measurementsValid_ = false;
+  surplusValid_ = false;
+  temperatureValid_ = false;
+  temperatureFault_ = false;
+  temperatureSampleSeen_ = false;
+  temperatureUnavailableTimerActive_ = false;
+  consecutiveValidTemperatureSamples_ = 0;
+  lastTemperatureSampleAtMs_ = 0;
+  temperatureUnavailableSinceMs_ = 0;
   surplusW_ = 0;
   temperatureC_ = 0.0F;
 }
@@ -23,6 +30,8 @@ void ControlEngine::update(const uint32_t nowMs) {
   if (state_ == ApplicationState::Fault) {
     return;
   }
+
+  updateTemperatureAvailability(nowMs);
 
   if (mode_ == OperatingMode::Automatic) {
     updateAutomatic(nowMs);
@@ -35,6 +44,7 @@ void ControlEngine::update(const uint32_t nowMs) {
 bool ControlEngine::setManualOutput(const uint8_t heaterPhases,
                                     const bool pump, const uint32_t nowMs) {
   if (heaterPhases > 3 || (heaterPhases > 0 && !pump) ||
+      (heaterPhases > 0 && !temperatureUsable(nowMs)) ||
       state_ == ApplicationState::Fault) {
     return false;
   }
@@ -89,8 +99,12 @@ bool ControlEngine::setOperatingMode(const OperatingMode mode,
   if (pumpOverrunActive_) {
     state_ = ApplicationState::PumpOverrun;
   } else if (mode_ == OperatingMode::Automatic) {
-    state_ = measurementsValid_ ? ApplicationState::Monitoring
-                                : ApplicationState::WaitingForData;
+    if (!temperatureUnavailableTimerActive_ &&
+        !temperatureUsable(nowMs)) {
+      temperatureUnavailableTimerActive_ = true;
+      temperatureUnavailableSinceMs_ = nowMs;
+    }
+    state_ = automaticIdleState(nowMs);
   } else {
     outputs_ = {};
     state_ = ApplicationState::Disabled;
@@ -98,11 +112,38 @@ bool ControlEngine::setOperatingMode(const OperatingMode mode,
   return true;
 }
 
-void ControlEngine::setMeasurements(const int32_t surplusW,
-                                    const float temperatureC) {
+void ControlEngine::setSurplusMeasurement(const int32_t surplusW) {
   surplusW_ = surplusW;
+  surplusValid_ = true;
+}
+
+void ControlEngine::setTemperatureMeasurement(const float temperatureC,
+                                              const bool valid,
+                                              const uint32_t nowMs) {
+  temperatureSampleSeen_ = true;
+  lastTemperatureSampleAtMs_ = nowMs;
+
+  if (!valid) {
+    consecutiveValidTemperatureSamples_ = 0;
+    temperatureValid_ = false;
+    if (!temperatureUnavailableTimerActive_) {
+      temperatureUnavailableTimerActive_ = true;
+      temperatureUnavailableSinceMs_ = nowMs;
+    }
+    return;
+  }
+
   temperatureC_ = temperatureC;
-  measurementsValid_ = true;
+  if (consecutiveValidTemperatureSamples_ <
+      config::control::kTemperatureRecoverySamples) {
+    ++consecutiveValidTemperatureSamples_;
+  }
+  if (consecutiveValidTemperatureSamples_ >=
+      config::control::kTemperatureRecoverySamples) {
+    temperatureValid_ = true;
+    temperatureFault_ = false;
+    temperatureUnavailableTimerActive_ = false;
+  }
 }
 
 void ControlEngine::setFault() {
@@ -122,14 +163,27 @@ ControlSnapshot ControlEngine::snapshot(const uint32_t nowMs) const {
       manualTimeoutRemaining(nowMs),
       pumpOverrunRemaining(nowMs),
       phaseChangeRemaining(nowMs),
-      measurementsValid_,
+      surplusValid_ && temperatureUsable(nowMs),
+      temperatureUsable(nowMs),
+      temperatureFault_,
       surplusW_,
       temperatureC_,
   };
 }
 
 void ControlEngine::updateAutomatic(const uint32_t nowMs) {
-  if (!measurementsValid_) {
+  if (!temperatureUsable(nowMs)) {
+    clearPhaseCandidate();
+    if (outputs_.heaterPhases > 0) {
+      stopHeatingWithPumpOverrun(nowMs);
+    }
+    if (!pumpOverrunActive_) {
+      state_ = temperatureUnavailableState();
+    }
+    return;
+  }
+
+  if (!surplusValid_) {
     clearPhaseCandidate();
     if (outputs_.heaterPhases > 0) {
       stopHeatingWithPumpOverrun(nowMs);
@@ -195,6 +249,13 @@ void ControlEngine::updateAutomatic(const uint32_t nowMs) {
 }
 
 void ControlEngine::updateManual(const uint32_t nowMs) {
+  if (outputs_.heaterPhases > 0 && !temperatureUsable(nowMs)) {
+    manualCommandActive_ = false;
+    mode_ = OperatingMode::Disabled;
+    stopHeatingWithPumpOverrun(nowMs);
+    return;
+  }
+
   if (!manualCommandActive_ ||
       nowMs - lastManualCommandAtMs_ < config::kManualOutputTimeoutMs) {
     return;
@@ -227,8 +288,7 @@ void ControlEngine::updatePumpOverrun(const uint32_t nowMs) {
   outputs_ = {};
   pumpOverrunActive_ = false;
   if (mode_ == OperatingMode::Automatic) {
-    state_ = temperatureLockout_ ? ApplicationState::TemperatureHold
-                                 : ApplicationState::Monitoring;
+    state_ = automaticIdleState(nowMs);
   } else {
     state_ = ApplicationState::Disabled;
   }
@@ -257,6 +317,36 @@ void ControlEngine::startPumpOverrun(const uint32_t nowMs) {
 
 void ControlEngine::clearPhaseCandidate() {
   phaseCandidateActive_ = false;
+}
+
+void ControlEngine::updateTemperatureAvailability(const uint32_t nowMs) {
+  if (!temperatureValid_ && temperatureUnavailableTimerActive_ &&
+      nowMs - temperatureUnavailableSinceMs_ >=
+          config::control::kTemperatureFaultDelayMs) {
+    temperatureFault_ = true;
+  }
+}
+
+bool ControlEngine::temperatureUsable(const uint32_t nowMs) const {
+  (void)nowMs;
+  return temperatureValid_ && temperatureSampleSeen_;
+}
+
+ApplicationState ControlEngine::temperatureUnavailableState() const {
+  return temperatureFault_ ? ApplicationState::TemperatureFault
+                           : ApplicationState::WaitingForTemperature;
+}
+
+ApplicationState ControlEngine::automaticIdleState(
+    const uint32_t nowMs) const {
+  if (!temperatureUsable(nowMs)) {
+    return temperatureUnavailableState();
+  }
+  if (!surplusValid_) {
+    return ApplicationState::WaitingForData;
+  }
+  return temperatureLockout_ ? ApplicationState::TemperatureHold
+                             : ApplicationState::Monitoring;
 }
 
 uint32_t ControlEngine::manualTimeoutRemaining(const uint32_t nowMs) const {

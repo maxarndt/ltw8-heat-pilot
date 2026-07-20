@@ -1,5 +1,7 @@
 #include "Application.h"
 
+#include "TemperaturePolicy.h"
+
 void Application::begin() {
   control_.begin();
   if (!outputs_.begin() || !syncOutputs()) {
@@ -9,6 +11,9 @@ void Application::begin() {
     log_.println("[outputs] TCA9554 ready; all outputs are OFF");
   }
 
+  temperatures_.begin();
+  control_.setTemperatureMeasurement(0.0F, false, millis());
+
   log_.println();
   log_.println("LTW8 Heat Pilot");
   log_.println("Firmware started; all outputs are OFF.");
@@ -16,6 +21,8 @@ void Application::begin() {
 }
 
 void Application::update(const uint32_t nowMs) {
+  temperatures_.update(nowMs);
+  updateTemperatureMeasurement(nowMs);
   const OutputState before = control_.desiredOutputs();
   control_.update(nowMs);
   if (control_.desiredOutputs() != before && !syncOutputs()) {
@@ -53,9 +60,8 @@ bool Application::setOperatingMode(const OperatingMode mode,
   return true;
 }
 
-void Application::setSimulatedMeasurements(const int32_t surplusW,
-                                            const float temperatureC) {
-  control_.setMeasurements(surplusW, temperatureC);
+void Application::setSimulatedSurplus(const int32_t surplusW) {
+  control_.setSurplusMeasurement(surplusW);
 }
 
 ApplicationStatus Application::status(const uint32_t nowMs) const {
@@ -70,9 +76,49 @@ ApplicationStatus Application::status(const uint32_t nowMs) const {
       snapshot.pumpOverrunRemainingMs,
       snapshot.phaseChangeRemainingMs,
       snapshot.measurementsValid,
+      snapshot.temperatureValid,
+      snapshot.temperatureFault,
       snapshot.surplusW,
       snapshot.temperatureC,
   };
+}
+
+void Application::updateTemperatureMeasurement(const uint32_t nowMs) {
+  const uint8_t count = temperatures_.count();
+  if (count == 0) {
+    return;
+  }
+
+  const uint32_t measuredAtMs = temperatures_.reading(0).measuredAtMs;
+  if (measuredAtMs == 0) {
+    return;
+  }
+  if (measuredAtMs == lastTemperatureMeasurementAtMs_) {
+    if (!temperatureStaleReported_ &&
+        isTemperatureMeasurementStale(nowMs, measuredAtMs)) {
+      control_.setTemperatureMeasurement(0.0F, false, measuredAtMs);
+      temperatureStaleReported_ = true;
+    }
+    return;
+  }
+
+  bool allValid = true;
+  float highestTemperatureC = -55.0F;
+  for (uint8_t index = 0; index < count; ++index) {
+    const TemperatureSensorReading& reading = temperatures_.reading(index);
+    if (!reading.valid || reading.measuredAtMs != measuredAtMs) {
+      allValid = false;
+      continue;
+    }
+    if (reading.temperatureC > highestTemperatureC) {
+      highestTemperatureC = reading.temperatureC;
+    }
+  }
+
+  lastTemperatureMeasurementAtMs_ = measuredAtMs;
+  temperatureStaleReported_ = false;
+  control_.setTemperatureMeasurement(highestTemperatureC, allValid,
+                                     measuredAtMs);
 }
 
 bool Application::syncOutputs() {
@@ -88,7 +134,8 @@ void Application::printStatus(const uint32_t nowMs) const {
   log_.printf(
       "[status] uptime_ms=%lu mode=%s state=%s heater_phases=%u pump=%u "
       "outputs_healthy=%u manual_timeout_ms=%lu pump_overrun_ms=%lu "
-      "phase_change_ms=%lu surplus_w=%ld temperature_c=%.1f inputs_valid=%u\n",
+      "phase_change_ms=%lu surplus_w=%ld temperature_c=%.1f inputs_valid=%u "
+      "temperature_valid=%u temperature_fault=%u\n",
       static_cast<unsigned long>(current.uptimeMs), current.mode, current.state,
       current.outputs.heaterPhases, current.outputs.circulationPump,
       current.outputDriverHealthy,
@@ -96,7 +143,8 @@ void Application::printStatus(const uint32_t nowMs) const {
       static_cast<unsigned long>(current.pumpOverrunRemainingMs),
       static_cast<unsigned long>(current.phaseChangeRemainingMs),
       static_cast<long>(current.surplusW), current.temperatureC,
-      current.measurementsValid);
+      current.measurementsValid, current.temperatureValid,
+      current.temperatureFault);
 }
 
 const char* Application::toString(const OperatingMode mode) {
@@ -129,6 +177,10 @@ const char* Application::toString(const ApplicationState state) {
       return "temperature_hold";
     case ApplicationState::WaitingForData:
       return "waiting_for_data";
+    case ApplicationState::WaitingForTemperature:
+      return "waiting_for_temperature";
+    case ApplicationState::TemperatureFault:
+      return "temperature_fault";
     case ApplicationState::Fault:
       return "fault";
   }

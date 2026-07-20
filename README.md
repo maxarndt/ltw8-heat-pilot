@@ -85,6 +85,12 @@ Read the current state:
 curl http://heat-pilot.local/api/v1/status
 ```
 
+DS18B20-compatible temperature sensors are connected in parallel to GPIO1
+(`IO1`) with one pull-up resistor from `IO1` to 3.3 V. The status response lists
+their unique addresses and readings in `temperature_sensors`. Sensor positions
+such as buffer top, middle, and bottom will be assigned to these addresses after
+installation.
+
 Set the manual outputs (heater phases 0 to 3, pump true or false):
 
 ```sh
@@ -105,8 +111,14 @@ Set simulated measurements (positive surplus means exported power):
 ```sh
 curl -X PUT http://heat-pilot.local/api/v1/simulation \
   -H 'Content-Type: application/json' \
-  -d '{"surplus_w":5000,"temperature_c":60.0}'
+  -d '{"surplus_w":5000}'
 ```
+
+Temperature is always taken from the physical 1-Wire sensors and cannot be
+overridden through the simulation endpoint. Heating is inhibited until all
+detected sensors have produced two consecutive valid readings. Missing,
+invalid, or stale readings stop the heater immediately and retain the pump
+overrun.
 
 Enable automatic mode:
 

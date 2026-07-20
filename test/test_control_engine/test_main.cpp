@@ -8,6 +8,7 @@
 #include "Config.h"
 #include "ControlEngine.h"
 #include "OutputEncoding.h"
+#include "TemperaturePolicy.h"
 
 namespace {
 
@@ -21,9 +22,17 @@ ControlEngine automaticEngine(const int32_t surplusW = 0,
                               const float temperatureC = 60.0F) {
   ControlEngine engine;
   engine.begin();
-  engine.setMeasurements(surplusW, temperatureC);
+  engine.setSurplusMeasurement(surplusW);
+  engine.setTemperatureMeasurement(temperatureC, true, 0);
+  engine.setTemperatureMeasurement(temperatureC, true, 0);
   TEST_ASSERT_TRUE(engine.setOperatingMode(OperatingMode::Automatic, 0));
   return engine;
+}
+
+void enableTemperature(ControlEngine& engine, const float temperatureC = 60.0F,
+                       const uint32_t nowMs = 0) {
+  engine.setTemperatureMeasurement(temperatureC, true, nowMs);
+  engine.setTemperatureMeasurement(temperatureC, true, nowMs);
 }
 
 void test_starts_disabled_and_safe() {
@@ -41,6 +50,7 @@ void test_starts_disabled_and_safe() {
 void test_automatic_waits_for_measurements() {
   ControlEngine engine;
   engine.begin();
+  enableTemperature(engine);
   TEST_ASSERT_TRUE(engine.setOperatingMode(OperatingMode::Automatic, 0));
   engine.update(0);
 
@@ -77,9 +87,9 @@ void test_unstable_surplus_restarts_phase_timer() {
   ControlEngine engine = automaticEngine(1700);
   engine.update(0);
 
-  engine.setMeasurements(1600, 60.0F);
+  engine.setSurplusMeasurement(1600);
   engine.update(20000);
-  engine.setMeasurements(1700, 60.0F);
+  engine.setSurplusMeasurement(1700);
   engine.update(25000);
   engine.update(54999);
   assertOutputs(engine, 0, false);
@@ -95,7 +105,7 @@ void test_phases_are_removed_one_at_a_time() {
   engine.update(60001);
   assertOutputs(engine, 2, true);
 
-  engine.setMeasurements(-201, 60.0F);
+  engine.setSurplusMeasurement(-201);
   engine.update(60002);
   engine.update(90002);
   assertOutputs(engine, 1, true);
@@ -126,12 +136,12 @@ void test_disable_threshold_is_strict_and_stable() {
   engine.update(30000);
   assertOutputs(engine, 1, true);
 
-  engine.setMeasurements(-200, 60.0F);  // available power is exactly 1300 W
+  engine.setSurplusMeasurement(-200);  // available power is exactly 1300 W
   engine.update(30001);
   engine.update(70000);
   assertOutputs(engine, 1, true);
 
-  engine.setMeasurements(-201, 60.0F);
+  engine.setSurplusMeasurement(-201);
   engine.update(70001);
   engine.update(100000);
   assertOutputs(engine, 1, true);
@@ -144,7 +154,8 @@ void test_target_temperature_stops_heater_and_overruns_pump() {
   engine.update(0);
   engine.update(30000);
 
-  engine.setMeasurements(200, 80.0F);
+  engine.setSurplusMeasurement(200);
+  engine.setTemperatureMeasurement(80.0F, true, 30001);
   engine.update(30001);
   assertOutputs(engine, 0, true);
   TEST_ASSERT_EQUAL_INT(static_cast<int>(ApplicationState::PumpOverrun),
@@ -164,12 +175,14 @@ void test_temperature_hysteresis_releases_at_76_degrees() {
   TEST_ASSERT_EQUAL_INT(static_cast<int>(ApplicationState::TemperatureHold),
                         static_cast<int>(engine.snapshot(0).state));
 
-  engine.setMeasurements(1700, 77.0F);
+  engine.setSurplusMeasurement(1700);
+  engine.setTemperatureMeasurement(77.0F, true, 1);
   engine.update(1);
   engine.update(60000);
   assertOutputs(engine, 0, false);
 
-  engine.setMeasurements(1700, 76.0F);
+  engine.setSurplusMeasurement(1700);
+  engine.setTemperatureMeasurement(76.0F, true, 60001);
   engine.update(60001);
   engine.update(90000);
   assertOutputs(engine, 0, false);
@@ -180,6 +193,7 @@ void test_temperature_hysteresis_releases_at_76_degrees() {
 void test_manual_interlock_rejects_heater_without_pump() {
   ControlEngine engine;
   engine.begin();
+  enableTemperature(engine);
 
   TEST_ASSERT_FALSE(engine.setManualOutput(1, false, 0));
   assertOutputs(engine, 0, false);
@@ -188,6 +202,7 @@ void test_manual_interlock_rejects_heater_without_pump() {
 void test_manual_heater_timeout_starts_pump_overrun() {
   ControlEngine engine;
   engine.begin();
+  enableTemperature(engine);
   TEST_ASSERT_TRUE(engine.setManualOutput(2, true, 100));
 
   engine.update(60099);
@@ -206,6 +221,7 @@ void test_manual_heater_timeout_starts_pump_overrun() {
 void test_manual_off_command_starts_pump_overrun() {
   ControlEngine engine;
   engine.begin();
+  enableTemperature(engine);
   TEST_ASSERT_TRUE(engine.setManualOutput(3, true, 0));
 
   TEST_ASSERT_TRUE(engine.setManualOutput(0, false, 100));
@@ -234,6 +250,7 @@ void test_manual_pump_only_timeout_stops_without_overrun() {
 void test_disabling_active_heater_keeps_pump_running() {
   ControlEngine engine;
   engine.begin();
+  enableTemperature(engine);
   TEST_ASSERT_TRUE(engine.setManualOutput(1, true, 0));
   TEST_ASSERT_TRUE(engine.setOperatingMode(OperatingMode::Disabled, 10));
 
@@ -257,12 +274,97 @@ void test_timeouts_work_across_millis_wraparound() {
 void test_fault_is_safe_and_rejects_commands() {
   ControlEngine engine;
   engine.begin();
+  enableTemperature(engine);
   TEST_ASSERT_TRUE(engine.setManualOutput(2, true, 0));
 
   engine.setFault();
   assertOutputs(engine, 0, false);
   TEST_ASSERT_FALSE(engine.setManualOutput(1, true, 1));
   TEST_ASSERT_FALSE(engine.setOperatingMode(OperatingMode::Automatic, 1));
+}
+
+void test_missing_temperature_becomes_temperature_fault() {
+  ControlEngine engine;
+  engine.begin();
+  engine.setSurplusMeasurement(5000);
+  TEST_ASSERT_TRUE(engine.setOperatingMode(OperatingMode::Automatic, 0));
+
+  engine.update(config::control::kTemperatureFaultDelayMs - 1);
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(ApplicationState::WaitingForTemperature),
+      static_cast<int>(engine.snapshot(
+                                  config::control::kTemperatureFaultDelayMs - 1)
+                           .state));
+  assertOutputs(engine, 0, false);
+
+  engine.update(config::control::kTemperatureFaultDelayMs);
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(ApplicationState::TemperatureFault),
+      static_cast<int>(
+          engine.snapshot(config::control::kTemperatureFaultDelayMs).state));
+  TEST_ASSERT_TRUE(
+      engine.snapshot(config::control::kTemperatureFaultDelayMs)
+          .temperatureFault);
+}
+
+void test_temperature_fault_requires_two_valid_samples_to_recover() {
+  ControlEngine engine;
+  engine.begin();
+  engine.setSurplusMeasurement(0);
+  TEST_ASSERT_TRUE(engine.setOperatingMode(OperatingMode::Automatic, 0));
+  engine.update(config::control::kTemperatureFaultDelayMs);
+
+  engine.setTemperatureMeasurement(60.0F, true, 16000);
+  engine.update(16000);
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(ApplicationState::TemperatureFault),
+      static_cast<int>(engine.snapshot(16000).state));
+
+  engine.setTemperatureMeasurement(60.0F, true, 17000);
+  engine.update(17000);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ApplicationState::Monitoring),
+                        static_cast<int>(engine.snapshot(17000).state));
+  TEST_ASSERT_TRUE(engine.snapshot(17000).temperatureValid);
+  TEST_ASSERT_FALSE(engine.snapshot(17000).temperatureFault);
+}
+
+void test_temperature_loss_stops_heater_and_overruns_pump() {
+  ControlEngine engine = automaticEngine(1700);
+  engine.update(0);
+  engine.update(config::control::kPhaseChangeStableMs);
+  assertOutputs(engine, 1, true);
+
+  engine.setTemperatureMeasurement(-127.0F, false, 30001);
+  engine.update(30001);
+  assertOutputs(engine, 0, true);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ApplicationState::PumpOverrun),
+                        static_cast<int>(engine.snapshot(30001).state));
+  TEST_ASSERT_FALSE(engine.snapshot(30001).temperatureValid);
+}
+
+void test_manual_heater_requires_valid_temperature() {
+  ControlEngine engine;
+  engine.begin();
+
+  TEST_ASSERT_FALSE(engine.setManualOutput(1, true, 0));
+  TEST_ASSERT_TRUE(engine.setManualOutput(0, true, 0));
+  assertOutputs(engine, 0, true);
+}
+
+void test_temperature_staleness_boundary_and_millis_wraparound() {
+  TEST_ASSERT_FALSE(isTemperatureMeasurementStale(
+      config::control::kTemperatureStaleMs, 0));
+  TEST_ASSERT_TRUE(isTemperatureMeasurementStale(
+      config::control::kTemperatureStaleMs + 1, 0));
+
+  constexpr uint32_t measuredAt = UINT32_MAX - 1000U;
+  TEST_ASSERT_FALSE(isTemperatureMeasurementStale(
+      static_cast<uint32_t>(measuredAt + config::control::kTemperatureStaleMs),
+      measuredAt));
+  TEST_ASSERT_TRUE(isTemperatureMeasurementStale(
+      static_cast<uint32_t>(measuredAt +
+                            config::control::kTemperatureStaleMs + 1U),
+      measuredAt));
 }
 
 void test_active_low_output_encoding() {
@@ -322,6 +424,11 @@ int main() {
   RUN_TEST(test_disabling_active_heater_keeps_pump_running);
   RUN_TEST(test_timeouts_work_across_millis_wraparound);
   RUN_TEST(test_fault_is_safe_and_rejects_commands);
+  RUN_TEST(test_missing_temperature_becomes_temperature_fault);
+  RUN_TEST(test_temperature_fault_requires_two_valid_samples_to_recover);
+  RUN_TEST(test_temperature_loss_stops_heater_and_overruns_pump);
+  RUN_TEST(test_manual_heater_requires_valid_temperature);
+  RUN_TEST(test_temperature_staleness_boundary_and_millis_wraparound);
   RUN_TEST(test_active_low_output_encoding);
   RUN_TEST(test_manual_api_validation);
   RUN_TEST(test_temperature_api_validation);
