@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 
+#include "TemperatureSensorConfiguration.h"
+
 namespace config {
 
 constexpr char kHostname[] = "heat-pilot";
@@ -42,6 +44,18 @@ constexpr uint8_t kResolutionBits = 12;
 constexpr uint8_t kMaximumSensors = 8;
 constexpr uint32_t kConversionTimeMs = 750;
 constexpr uint32_t kMeasurementIntervalMs = 5000;
+constexpr uint32_t kConfigurationLogIntervalMs = 10000;
+
+// Replace these development sensors with the IDs and installation labels from
+// the buffer tank. Adding or removing entries changes the expected count.
+constexpr TemperatureSensorDefinition kSensors[] = {
+    {"test_sensor_1", {0x28, 0xF1, 0x9A, 0xBA, 0x00, 0x00, 0x00, 0xDB}},
+    {"test_sensor_2", {0x28, 0xA3, 0x91, 0xBA, 0x00, 0x00, 0x00, 0xEB}},
+};
+constexpr size_t kSensorCount = sizeof(kSensors) / sizeof(kSensors[0]);
+static_assert(kSensorCount > 0, "At least one temperature sensor is required");
+static_assert(kSensorCount <= kMaximumSensors,
+              "Configured temperature sensor count exceeds storage");
 }  // namespace temperature
 
 namespace modbus {

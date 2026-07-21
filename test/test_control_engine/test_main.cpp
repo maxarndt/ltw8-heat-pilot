@@ -15,6 +15,7 @@
 #include "OutputEncoding.h"
 #include "RetainedOperationalState.h"
 #include "TemperaturePolicy.h"
+#include "TemperatureSensorConfiguration.h"
 
 namespace {
 
@@ -598,6 +599,52 @@ void test_temperature_api_validation() {
       isValidTemperature(-std::numeric_limits<float>::infinity()));
 }
 
+void test_temperature_sensor_configuration_matches_dynamic_lists() {
+  const TemperatureSensorDefinition definitions[] = {
+      {"bottom", {0x28, 1, 2, 3, 4, 5, 6, 7}},
+      {"top", {0x28, 8, 9, 10, 11, 12, 13, 14}},
+  };
+  const uint8_t detected[][8] = {
+      {0x28, 8, 9, 10, 11, 12, 13, 14},
+      {0x28, 1, 2, 3, 4, 5, 6, 7},
+  };
+  const TemperatureSensorConfigurationMatch match = matchTemperatureSensors(
+      &detected[0][0], 2, definitions, 2);
+  TEST_ASSERT_TRUE(match.valid());
+  TEST_ASSERT_EQUAL_INT(1, findTemperatureSensorDefinition(
+                               detected[0], definitions, 2));
+}
+
+void test_temperature_sensor_configuration_rejects_missing_and_unknown() {
+  const TemperatureSensorDefinition definitions[] = {
+      {"bottom", {0x28, 1, 2, 3, 4, 5, 6, 7}},
+      {"top", {0x28, 8, 9, 10, 11, 12, 13, 14}},
+  };
+  const uint8_t detected[][8] = {
+      {0x28, 1, 2, 3, 4, 5, 6, 7},
+      {0x28, 20, 21, 22, 23, 24, 25, 26},
+  };
+  const TemperatureSensorConfigurationMatch match = matchTemperatureSensors(
+      &detected[0][0], 2, definitions, 2);
+  TEST_ASSERT_FALSE(match.valid());
+  TEST_ASSERT_EQUAL_UINT32(1, match.missing);
+  TEST_ASSERT_EQUAL_UINT32(1, match.unknown);
+}
+
+void test_temperature_sensor_configuration_rejects_duplicate_ids() {
+  const TemperatureSensorDefinition definitions[] = {
+      {"bottom", {0x28, 1, 2, 3, 4, 5, 6, 7}},
+      {"top", {0x28, 1, 2, 3, 4, 5, 6, 7}},
+  };
+  const uint8_t detected[][8] = {
+      {0x28, 1, 2, 3, 4, 5, 6, 7},
+  };
+  const TemperatureSensorConfigurationMatch match = matchTemperatureSensors(
+      &detected[0][0], 1, definitions, 2);
+  TEST_ASSERT_FALSE(match.valid());
+  TEST_ASSERT_TRUE(match.duplicateConfiguredAddress);
+}
+
 void test_modbus_crc_accepts_official_request_and_response_examples() {
   const uint8_t request[] = {0x01, 0x03, 0x9C, 0x44,
                              0x00, 0x04, 0x2A, 0x4C};
@@ -828,6 +875,9 @@ int main() {
   RUN_TEST(test_active_low_output_encoding);
   RUN_TEST(test_manual_api_validation);
   RUN_TEST(test_temperature_api_validation);
+  RUN_TEST(test_temperature_sensor_configuration_matches_dynamic_lists);
+  RUN_TEST(test_temperature_sensor_configuration_rejects_missing_and_unknown);
+  RUN_TEST(test_temperature_sensor_configuration_rejects_duplicate_ids);
   RUN_TEST(test_modbus_crc_accepts_official_request_and_response_examples);
   RUN_TEST(test_modbus_crc_rejects_corruption_and_short_frames);
   RUN_TEST(test_modbus_framing_splits_concatenated_read_request_and_response);

@@ -24,7 +24,7 @@ API validation tests on the development machine:
 pio test -e native
 ```
 
-The tests use simulated timestamps and therefore verify 30, 60, and 90 second
+The tests use simulated timestamps and therefore verify 30, 45, and 60 second
 behavior without real waiting or a connected board.
 
 ## Upload
@@ -93,10 +93,17 @@ curl http://heat-pilot.local/api/v1/status
 ```
 
 DS18B20-compatible temperature sensors are connected in parallel to GPIO1
-(`IO1`) with one pull-up resistor from `IO1` to 3.3 V. The status response lists
-their unique addresses and readings in `temperature_sensors`. Sensor positions
-such as buffer top, middle, and bottom will be assigned to these addresses after
-installation.
+(`IO1`) with one pull-up resistor from `IO1` to 3.3 V. Expected sensors are
+configured as a list of labels and ROM addresses in `config::temperature`.
+Adding or removing list entries automatically changes the required count, for
+example for `buffer_bottom`, `buffer_middle`, `buffer_top`, or a sensor close to
+the heating element.
+
+At startup every configured sensor must be present and every detected sensor
+must be configured. Otherwise the state becomes
+`temperature_configuration_fault`, all control endpoints are rejected, and
+heating remains disabled. HTTP status and the TCP log continue to report all
+detected ROM addresses so the configuration can be corrected and reflashed.
 
 The onboard isolated RS485 interface runs as a strictly receive-only Modbus RTU
 sniffer on GPIO18 at 9600 baud, 8N1. GPIO21 is held in receive mode and no UART
@@ -121,8 +128,9 @@ pump overrun.
 
 The BYD HVS+ status block is decoded from Modbus unit 21. Battery state of
 charge, power, voltage, and capacity are exposed under `battery`. Automatic
-heating requires battery data not older than 12 seconds. Up to 500 W of battery
-discharge is tolerated transiently for at most 15 seconds and no more than 2 Wh;
+heating requires battery data not older than 12 seconds. Discharge up to 100 W
+is treated as inverter idle power and ignored. Above that deadband, up to 500 W
+is tolerated transiently for at most 15 seconds and no more than 2 Wh;
 exceeding either limit removes one heater phase. A value above 500 W removes one
 phase immediately. Another phase can only be removed after a new battery sample.
 
@@ -154,7 +162,7 @@ curl -X PUT http://heat-pilot.local/api/v1/manual-output \
 
 The three heater phases map to DO1 through DO3 and are enabled in order. The
 pump maps to DO4. The pump is mandatory while a heater phase is active. Sending
-zero phases and `pump: false` switches the heater off and starts the 90-second
+zero phases and `pump: false` switches the heater off and starts the 45-second
 pump overrun. Any active manual command times out after 60 seconds.
 The API is currently intended only for testing on a trusted local network and
 does not yet require authentication.
@@ -193,4 +201,4 @@ Control constants are collected in `include/Config.h`: each heater phase uses
 the Ohmpilot-derived estimate of 1625 W. A phase needs 1700 W to switch on and
 drops below 1300 W, and a new
 condition must remain stable for 30 seconds. The target temperature is 80 C;
-heating is released again at 76 C. The pump overruns for 90 seconds.
+heating is released again at 76 C. The pump overruns for 45 seconds.

@@ -58,6 +58,16 @@ void HttpApi::handleStatus() {
   response["measurements_valid"] = status.measurementsValid;
   response["temperature_valid"] = status.temperatureValid;
   response["temperature_fault"] = status.temperatureFault;
+  response["temperature_configuration_valid"] =
+      application_.temperatureConfigurationValid();
+  response["temperature_expected_sensor_count"] =
+      application_.expectedTemperatureSensorCount();
+  response["temperature_detected_sensor_count"] =
+      application_.detectedTemperatureSensorCount();
+  response["temperature_missing_sensor_count"] =
+      application_.missingTemperatureSensorCount();
+  response["temperature_unknown_sensor_count"] =
+      application_.unknownTemperatureSensorCount();
   response["target_temperature_c"] =
       config::control::kTargetTemperatureC;
   response["restart_temperature_c"] =
@@ -124,6 +134,8 @@ void HttpApi::handleStatus() {
     TemperatureService::formatAddress(reading.address, address,
                                       sizeof(address));
     sensor["address"] = address;
+    sensor["label"] = reading.label != nullptr ? reading.label : "unknown";
+    sensor["configured"] = reading.configured;
     sensor["valid"] = reading.valid;
     sensor["measured_at_ms"] = reading.measuredAtMs;
     if (reading.valid) {
@@ -237,6 +249,11 @@ void HttpApi::handleStatus() {
 }
 
 void HttpApi::handleManualOutput() {
+  if (!application_.temperatureConfigurationValid()) {
+    sendError(409, "temperature_configuration_invalid",
+              "Temperature sensors do not match configuration");
+    return;
+  }
   JsonDocument request;
   const DeserializationError error = deserializeJson(request, server_.arg("plain"));
   if (error) {
@@ -283,6 +300,11 @@ void HttpApi::handleManualOutput() {
 }
 
 void HttpApi::handleMode() {
+  if (!application_.temperatureConfigurationValid()) {
+    sendError(409, "temperature_configuration_invalid",
+              "Temperature sensors do not match configuration");
+    return;
+  }
   JsonDocument request;
   if (deserializeJson(request, server_.arg("plain")) ||
       !request["mode"].is<const char*>()) {
@@ -319,6 +341,11 @@ void HttpApi::handleSimulation() {
     application_.disableSimulatedSurplus(millis());
     log_.println("[simulation] disabled; using smart meter");
     handleStatus();
+    return;
+  }
+  if (!application_.temperatureConfigurationValid()) {
+    sendError(409, "temperature_configuration_invalid",
+              "Temperature sensors do not match configuration");
     return;
   }
   if (!request["surplus_w"].is<int>()) {

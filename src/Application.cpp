@@ -54,7 +54,7 @@ void Application::update(const uint32_t nowMs) {
 
 bool Application::setManualOutput(const uint8_t heaterPhases, const bool pump,
                                   const uint32_t nowMs) {
-  if (!outputs_.healthy() ||
+  if (!temperatures_.configurationValid() || !outputs_.healthy() ||
       !control_.setManualOutput(heaterPhases, pump, nowMs)) {
     return false;
   }
@@ -67,7 +67,8 @@ bool Application::setManualOutput(const uint8_t heaterPhases, const bool pump,
 
 bool Application::setOperatingMode(const OperatingMode mode,
                                    const uint32_t nowMs) {
-  if (!outputs_.healthy() || !control_.setOperatingMode(mode, nowMs)) {
+  if (!temperatures_.configurationValid() || !outputs_.healthy() ||
+      !control_.setOperatingMode(mode, nowMs)) {
     return false;
   }
   if (!syncOutputs(nowMs)) {
@@ -78,6 +79,9 @@ bool Application::setOperatingMode(const OperatingMode mode,
 }
 
 void Application::setSimulatedSurplus(const int32_t surplusW) {
+  if (!temperatures_.configurationValid()) {
+    return;
+  }
   simulatedSurplusEnabled_ = true;
   control_.setSurplusMeasurement(surplusW);
   control_.setBatteryMeasurement(10000, 0);
@@ -98,7 +102,8 @@ ApplicationStatus Application::status(const uint32_t nowMs) const {
   return {
       nowMs,
       toString(snapshot.mode),
-      toString(snapshot.state),
+      temperatures_.configurationValid() ? toString(snapshot.state)
+                                         : "temperature_configuration_fault",
       snapshot.outputs,
       outputs_.healthy(),
       snapshot.manualTimeoutRemainingMs,
@@ -115,6 +120,9 @@ ApplicationStatus Application::status(const uint32_t nowMs) const {
 }
 
 void Application::updateTemperatureMeasurement(const uint32_t nowMs) {
+  if (!temperatures_.configurationValid()) {
+    return;
+  }
   const uint8_t count = temperatures_.count();
   if (count == 0) {
     return;

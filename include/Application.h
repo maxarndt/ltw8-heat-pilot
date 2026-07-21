@@ -48,6 +48,21 @@ class Application {
   uint32_t smartMeterTimeouts() const { return smartMeterTimeouts_; }
   uint32_t batteryTimeouts() const { return batteryTimeouts_; }
   uint8_t temperatureSensorCount() const { return temperatures_.count(); }
+  bool temperatureConfigurationValid() const {
+    return temperatures_.configurationValid();
+  }
+  uint8_t expectedTemperatureSensorCount() const {
+    return static_cast<uint8_t>(config::temperature::kSensorCount);
+  }
+  uint8_t detectedTemperatureSensorCount() const {
+    return temperatures_.detectedCount();
+  }
+  uint8_t missingTemperatureSensorCount() const {
+    return temperatures_.missingCount();
+  }
+  uint8_t unknownTemperatureSensorCount() const {
+    return temperatures_.unknownCount();
+  }
   const TemperatureSensorReading& temperatureSensor(uint8_t index) const {
     return temperatures_.reading(index);
   }
