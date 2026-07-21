@@ -297,23 +297,28 @@ void test_disable_threshold_is_strict_and_stable() {
 }
 
 void test_target_temperature_stops_heater_and_overruns_pump() {
+  constexpr uint32_t overrunStartedAtMs = 30001;
   ControlEngine engine = automaticEngine(1700);
   engine.update(0);
   engine.update(30000);
 
   engine.setSurplusMeasurement(200);
-  engine.setTemperatureMeasurement(80.0F, true, 30001);
-  engine.update(30001);
+  engine.setTemperatureMeasurement(80.0F, true, overrunStartedAtMs);
+  engine.update(overrunStartedAtMs);
   assertOutputs(engine, 0, true);
   TEST_ASSERT_EQUAL_INT(static_cast<int>(ApplicationState::PumpOverrun),
-                        static_cast<int>(engine.snapshot(30001).state));
+                        static_cast<int>(engine.snapshot(overrunStartedAtMs).state));
 
-  engine.update(120000);
+  engine.update(overrunStartedAtMs + config::control::kPumpOverrunMs - 1U);
   assertOutputs(engine, 0, true);
-  engine.update(120001);
+  engine.update(overrunStartedAtMs + config::control::kPumpOverrunMs);
   assertOutputs(engine, 0, false);
   TEST_ASSERT_EQUAL_INT(static_cast<int>(ApplicationState::TemperatureHold),
-                        static_cast<int>(engine.snapshot(120001).state));
+                        static_cast<int>(
+                            engine
+                                .snapshot(overrunStartedAtMs +
+                                          config::control::kPumpOverrunMs)
+                                .state));
 }
 
 void test_temperature_hysteresis_releases_at_76_degrees() {
@@ -347,6 +352,7 @@ void test_manual_interlock_rejects_heater_without_pump() {
 }
 
 void test_manual_heater_timeout_starts_pump_overrun() {
+  constexpr uint32_t overrunStartedAtMs = 60100;
   ControlEngine engine;
   engine.begin();
   enableTemperature(engine);
@@ -354,14 +360,14 @@ void test_manual_heater_timeout_starts_pump_overrun() {
 
   engine.update(60099);
   assertOutputs(engine, 2, true);
-  engine.update(60100);
+  engine.update(overrunStartedAtMs);
   assertOutputs(engine, 0, true);
   TEST_ASSERT_EQUAL_INT(static_cast<int>(OperatingMode::Disabled),
-                        static_cast<int>(engine.snapshot(60100).mode));
+                        static_cast<int>(engine.snapshot(overrunStartedAtMs).mode));
 
-  engine.update(150099);
+  engine.update(overrunStartedAtMs + config::control::kPumpOverrunMs - 1U);
   assertOutputs(engine, 0, true);
-  engine.update(150100);
+  engine.update(overrunStartedAtMs + config::control::kPumpOverrunMs);
   assertOutputs(engine, 0, false);
 }
 
