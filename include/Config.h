@@ -60,6 +60,18 @@ constexpr uint64_t kTransientDischargeBudgetWattMilliseconds =
     2ULL * 3600ULL * 1000ULL;
 }  // namespace battery
 
+namespace telemetry {
+constexpr char kOtlpMetricsEndpoint[] =
+    "http://otel.ltw8.net:4318/v1/metrics";
+constexpr char kNtpServer[] = "pool.ntp.org";
+constexpr char kServiceName[] = "heat-pilot";
+constexpr uint32_t kExportIntervalMs = 15000;
+constexpr uint16_t kHttpTimeoutMs = 1000;
+constexpr uint32_t kTaskStackBytes = 12288;
+constexpr uint8_t kTaskPriority = 1;
+constexpr uint8_t kTaskCore = 0;
+}  // namespace telemetry
+
 namespace ethernet {
 constexpr int8_t kInterruptPin = 12;
 constexpr int8_t kMosiPin = 13;

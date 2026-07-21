@@ -6,6 +6,7 @@
 #include "NetworkService.h"
 #include "OutputController.h"
 #include "TemperatureService.h"
+#include "TelemetryService.h"
 
 namespace {
 NetworkService network;
@@ -14,7 +15,8 @@ OutputController outputs;
 TemperatureService temperatures(logOutput);
 ModbusSniffer modbusSniffer(logOutput);
 Application application(logOutput, outputs, temperatures, modbusSniffer);
-HttpApi httpApi(application, logOutput);
+TelemetryService telemetry(application, logOutput);
+HttpApi httpApi(application, telemetry, logOutput);
 }
 
 void setup() {
@@ -32,8 +34,12 @@ void setup() {
 }
 
 void loop() {
+  const uint32_t loopStartedAtUs = micros();
+  const uint32_t nowMs = millis();
   network.update();
-  application.update(millis());
+  application.update(nowMs);
   httpApi.update(network.online());
+  telemetry.update(network.online(), nowMs);
+  telemetry.observeLoopDuration(micros() - loopStartedAtUs);
   delay(1);
 }

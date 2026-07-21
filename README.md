@@ -126,7 +126,14 @@ phase immediately. Another phase can only be removed after a new battery sample.
 
 The `modbus_sniffer` status includes CRC and overflow counters as well as
 `smart_meter_timeouts` and `battery_timeouts`. These counters are intended for
-later OTLP export.
+OTLP export.
+
+Metrics are exported every 15 seconds as OTLP/HTTP JSON to the endpoint in
+`config::telemetry`. NTP timestamps come from `pool.ntp.org`; control timers
+continue to use the monotonic `millis()` clock. Export runs in a separate task,
+so an unavailable collector cannot delay control or Modbus processing. The
+status response exposes exporter counters and runtime diagnostics under
+`telemetry` and `diagnostics`.
 
 Set the manual outputs (heater phases 0 to 3, pump true or false):
 

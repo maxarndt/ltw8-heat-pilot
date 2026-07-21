@@ -5,6 +5,7 @@
 #include "ApiValidation.h"
 #include "Application.h"
 #include "Config.h"
+#include "TelemetryService.h"
 #include "WebUi.h"
 
 void HttpApi::update(const bool networkOnline) {
@@ -71,6 +72,25 @@ void HttpApi::handleStatus() {
           ? "simulation"
           : (smartMeterFresh ? "smart_meter" : "unavailable");
   response["temperature_c"] = status.temperatureC;
+
+  const TelemetryStatus telemetryStatus = telemetry_.status();
+  JsonObject diagnostics = response["diagnostics"].to<JsonObject>();
+  diagnostics["free_heap_bytes"] = telemetryStatus.freeHeapBytes;
+  diagnostics["minimum_free_heap_bytes"] =
+      telemetryStatus.minimumFreeHeapBytes;
+  diagnostics["maximum_loop_duration_us"] =
+      telemetryStatus.maximumLoopDurationUs;
+  diagnostics["last_interval_maximum_loop_duration_us"] =
+      telemetryStatus.lastIntervalMaximumLoopDurationUs;
+
+  JsonObject telemetry = response["telemetry"].to<JsonObject>();
+  telemetry["started"] = telemetryStatus.started;
+  telemetry["time_synchronized"] = telemetryStatus.timeSynchronized;
+  telemetry["export_successes"] = telemetryStatus.exportSuccesses;
+  telemetry["export_failures"] = telemetryStatus.exportFailures;
+  telemetry["last_http_status"] = telemetryStatus.lastHttpStatus;
+  telemetry["last_attempt_at_ms"] = telemetryStatus.lastAttemptAtMs;
+  telemetry["last_success_at_ms"] = telemetryStatus.lastSuccessAtMs;
 
   JsonArray temperatureSensors =
       response["temperature_sensors"].to<JsonArray>();
