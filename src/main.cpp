@@ -6,6 +6,7 @@
 #include "ModbusSniffer.h"
 #include "NetworkService.h"
 #include "OutputController.h"
+#include "RetainedOperationalState.h"
 #include "TemperatureService.h"
 #include "TelemetryService.h"
 
@@ -13,13 +14,15 @@ namespace {
 constexpr uint32_t kRetainedStageMagic = 0x48505354;
 RTC_DATA_ATTR uint32_t retainedStageMagic;
 RTC_DATA_ATTR uint8_t retainedStage;
+RTC_DATA_ATTR RetainedOperationalState retainedOperationalState;
 
 NetworkService network;
 LogOutput logOutput(network);
 OutputController outputs;
 TemperatureService temperatures(logOutput);
 ModbusSniffer modbusSniffer(logOutput);
-Application application(logOutput, outputs, temperatures, modbusSniffer);
+Application application(logOutput, outputs, temperatures, modbusSniffer,
+                        retainedOperationalState);
 TelemetryService telemetry(application, logOutput);
 HttpApi httpApi(application, telemetry, logOutput);
 
@@ -51,6 +54,11 @@ const char* resetReasonName(const esp_reset_reason_t reason) {
   }
 }
 
+bool isUnexpectedReset(const esp_reset_reason_t reason) {
+  return reason == ESP_RST_PANIC || reason == ESP_RST_INT_WDT ||
+         reason == ESP_RST_TASK_WDT || reason == ESP_RST_WDT;
+}
+
 void enterStage(const MainLoopStage stage) {
   retainedStageMagic = kRetainedStageMagic;
   retainedStage = static_cast<uint8_t>(stage);
@@ -58,15 +66,19 @@ void enterStage(const MainLoopStage stage) {
 }
 
 void setup() {
+  const esp_reset_reason_t resetReason = esp_reset_reason();
+  const bool recoverPumpOverrun =
+      isUnexpectedReset(resetReason) &&
+      shouldRecoverPumpOverrun(retainedOperationalState);
   const MainLoopStage previousStage =
       retainedStageMagic == kRetainedStageMagic
           ? static_cast<MainLoopStage>(retainedStage)
           : MainLoopStage::Idle;
-  telemetry.setResetDiagnostics(resetReasonName(esp_reset_reason()),
+  telemetry.setResetDiagnostics(resetReasonName(resetReason),
                                 previousStage);
   enterStage(MainLoopStage::Setup);
   Serial.begin(115200);
-  application.begin();
+  application.begin(recoverPumpOverrun);
   enableLoopWDT();
   network.begin();
   enterStage(MainLoopStage::Idle);

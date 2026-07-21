@@ -13,6 +13,7 @@
 #include "ModbusRtu.h"
 #include "ModbusRtuFraming.h"
 #include "OutputEncoding.h"
+#include "RetainedOperationalState.h"
 #include "TemperaturePolicy.h"
 
 namespace {
@@ -345,6 +346,47 @@ void test_manual_heater_timeout_starts_pump_overrun() {
   assertOutputs(engine, 0, true);
   engine.update(150100);
   assertOutputs(engine, 0, false);
+}
+
+void test_recovered_pump_overrun_runs_for_full_duration() {
+  ControlEngine engine;
+  engine.begin();
+  engine.recoverPumpOverrun(100);
+
+  assertOutputs(engine, 0, true);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ApplicationState::PumpOverrun),
+                        static_cast<int>(engine.snapshot(100).state));
+  TEST_ASSERT_EQUAL_UINT32(config::control::kPumpOverrunMs,
+                           engine.snapshot(100).pumpOverrunRemainingMs);
+
+  engine.update(100 + config::control::kPumpOverrunMs - 1U);
+  assertOutputs(engine, 0, true);
+  engine.update(100 + config::control::kPumpOverrunMs);
+  assertOutputs(engine, 0, false);
+}
+
+void test_retained_activity_recovers_only_heating_and_overrun() {
+  RetainedOperationalState state{};
+  TEST_ASSERT_FALSE(retainedOperationalStateValid(state));
+  TEST_ASSERT_FALSE(shouldRecoverPumpOverrun(state));
+
+  writeRetainedActivity(state, RetainedActivity::Idle);
+  TEST_ASSERT_TRUE(retainedOperationalStateValid(state));
+  TEST_ASSERT_FALSE(shouldRecoverPumpOverrun(state));
+
+  writeRetainedActivity(state, RetainedActivity::Heating);
+  TEST_ASSERT_TRUE(shouldRecoverPumpOverrun(state));
+
+  writeRetainedActivity(state, RetainedActivity::PumpOverrun);
+  TEST_ASSERT_TRUE(shouldRecoverPumpOverrun(state));
+}
+
+void test_corrupted_retained_activity_is_rejected() {
+  RetainedOperationalState state{};
+  writeRetainedActivity(state, RetainedActivity::Heating);
+  state.checksum ^= 1U;
+  TEST_ASSERT_FALSE(retainedOperationalStateValid(state));
+  TEST_ASSERT_FALSE(shouldRecoverPumpOverrun(state));
 }
 
 void test_manual_off_command_starts_pump_overrun() {
@@ -746,6 +788,9 @@ int main() {
   RUN_TEST(test_temperature_hysteresis_releases_at_76_degrees);
   RUN_TEST(test_manual_interlock_rejects_heater_without_pump);
   RUN_TEST(test_manual_heater_timeout_starts_pump_overrun);
+  RUN_TEST(test_recovered_pump_overrun_runs_for_full_duration);
+  RUN_TEST(test_retained_activity_recovers_only_heating_and_overrun);
+  RUN_TEST(test_corrupted_retained_activity_is_rejected);
   RUN_TEST(test_manual_off_command_starts_pump_overrun);
   RUN_TEST(test_manual_pump_only_timeout_stops_without_overrun);
   RUN_TEST(test_disabling_active_heater_keeps_pump_running);

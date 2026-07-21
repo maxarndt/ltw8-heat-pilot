@@ -101,6 +101,8 @@ void HttpApi::handleStatus() {
       telemetryStatus.previousResetReason;
   diagnostics["previous_reset_stage"] =
       telemetryStatus.previousResetStage;
+  diagnostics["pump_overrun_recovered_after_reset"] =
+      status.pumpOverrunRecoveredAfterReset;
 
   JsonObject telemetry = response["telemetry"].to<JsonObject>();
   telemetry["started"] = telemetryStatus.started;

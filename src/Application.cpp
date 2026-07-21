@@ -2,15 +2,24 @@
 
 #include "TemperaturePolicy.h"
 
-void Application::begin() {
+void Application::begin(const bool recoverPumpOverrun) {
   const uint32_t nowMs = millis();
   control_.begin();
+  if (recoverPumpOverrun) {
+    control_.recoverPumpOverrun(nowMs);
+  }
   heaterEnergyMeter_.begin(nowMs);
   if (!outputs_.begin() || !syncOutputs(nowMs)) {
     control_.setFault();
     log_.println("[outputs] failed to initialize TCA9554; state=fault");
   } else {
-    log_.println("[outputs] TCA9554 ready; all outputs are OFF");
+    if (recoverPumpOverrun) {
+      pumpOverrunRecoveredAfterReset_ = true;
+      log_.println(
+          "[outputs] interrupted heating detected; pump overrun recovered");
+    } else {
+      log_.println("[outputs] TCA9554 ready; all outputs are OFF");
+    }
   }
 
   temperatures_.begin();
@@ -19,7 +28,8 @@ void Application::begin() {
 
   log_.println();
   log_.println("LTW8 Heat Pilot");
-  log_.println("Firmware started; all outputs are OFF.");
+  log_.printf("Firmware started; heater phases are OFF; pump is %s.\n",
+              outputs_.state().circulationPump ? "ON" : "OFF");
   printStatus(millis());
 }
 
@@ -100,6 +110,7 @@ ApplicationStatus Application::status(const uint32_t nowMs) const {
       snapshot.surplusW,
       snapshot.temperatureC,
       heaterEnergyMeter_.wattHours(nowMs),
+      pumpOverrunRecoveredAfterReset_,
   };
 }
 
@@ -201,12 +212,34 @@ bool Application::syncOutputs(const uint32_t nowMs) {
   heaterEnergyMeter_.update(nowMs, outputs_.state().heaterPhases);
   const OutputState& desired = control_.desiredOutputs();
   if (outputs_.state() == desired) {
+    persistAppliedOutputState(nowMs);
     return true;
+  }
+  // Record the safety-relevant intent before energizing a heater output. If a
+  // reset occurs in the tiny interval after the I2C write, recovery must still
+  // run the pump. A false-positive pump overrun is safer than missing one.
+  if (desired.heaterPhases > 0) {
+    writeRetainedActivity(retainedOperationalState_, RetainedActivity::Heating);
   }
   const bool updated =
       outputs_.set(desired.heaterPhases, desired.circulationPump);
   heaterEnergyMeter_.update(nowMs, outputs_.state().heaterPhases);
+  if (updated) {
+    persistAppliedOutputState(nowMs);
+  }
   return updated;
+}
+
+void Application::persistAppliedOutputState(const uint32_t nowMs) {
+  const OutputState& applied = outputs_.state();
+  RetainedActivity activity = RetainedActivity::Idle;
+  if (applied.heaterPhases > 0) {
+    activity = RetainedActivity::Heating;
+  } else if (applied.circulationPump &&
+             control_.snapshot(nowMs).pumpOverrunRemainingMs > 0) {
+    activity = RetainedActivity::PumpOverrun;
+  }
+  writeRetainedActivity(retainedOperationalState_, activity);
 }
 
 void Application::printStatus(const uint32_t nowMs) const {

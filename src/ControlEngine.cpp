@@ -167,6 +167,14 @@ void ControlEngine::setTemperatureMeasurement(const float temperatureC,
   }
 }
 
+void ControlEngine::recoverPumpOverrun(const uint32_t nowMs) {
+  mode_ = OperatingMode::Disabled;
+  outputs_ = {0, true};
+  manualCommandActive_ = false;
+  clearPhaseCandidate();
+  startPumpOverrun(nowMs);
+}
+
 void ControlEngine::setFault() {
   mode_ = OperatingMode::Disabled;
   state_ = ApplicationState::Fault;

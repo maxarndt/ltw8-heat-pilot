@@ -7,6 +7,7 @@
 #include "HeaterEnergyMeter.h"
 #include "ModbusSniffer.h"
 #include "OutputController.h"
+#include "RetainedOperationalState.h"
 #include "TemperatureService.h"
 
 struct ApplicationStatus {
@@ -24,16 +25,19 @@ struct ApplicationStatus {
   int32_t surplusW;
   float temperatureC;
   double estimatedHeaterEnergyWh;
+  bool pumpOverrunRecoveredAfterReset;
 };
 
 class Application {
  public:
   Application(Print& log, OutputController& outputs,
-              TemperatureService& temperatures, ModbusSniffer& modbusSniffer)
+              TemperatureService& temperatures, ModbusSniffer& modbusSniffer,
+              RetainedOperationalState& retainedOperationalState)
       : log_(log), outputs_(outputs), temperatures_(temperatures),
-        modbusSniffer_(modbusSniffer) {}
+        modbusSniffer_(modbusSniffer),
+        retainedOperationalState_(retainedOperationalState) {}
 
-  void begin();
+  void begin(bool recoverPumpOverrun = false);
   void update(uint32_t nowMs);
   bool setManualOutput(uint8_t heaterPhases, bool pump, uint32_t nowMs);
   bool setOperatingMode(OperatingMode mode, uint32_t nowMs);
@@ -73,6 +77,7 @@ class Application {
   static constexpr uint32_t kStatusIntervalMs = 2000;
 
   bool syncOutputs(uint32_t nowMs);
+  void persistAppliedOutputState(uint32_t nowMs);
   void updateTemperatureMeasurement(uint32_t nowMs);
   void updateSmartMeterMeasurement(uint32_t nowMs);
   void updateBatteryMeasurement(uint32_t nowMs);
@@ -90,10 +95,12 @@ class Application {
   bool smartMeterStaleReported_ = false;
   bool batteryStaleReported_ = false;
   bool simulatedSurplusEnabled_ = false;
+  bool pumpOverrunRecoveredAfterReset_ = false;
   Print& log_;
   OutputController& outputs_;
   TemperatureService& temperatures_;
   ModbusSniffer& modbusSniffer_;
+  RetainedOperationalState& retainedOperationalState_;
   HeaterEnergyMeter heaterEnergyMeter_{
       static_cast<uint32_t>(config::control::kHeaterPhasePowerW)};
   ControlEngine control_{};

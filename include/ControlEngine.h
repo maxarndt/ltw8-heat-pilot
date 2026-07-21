@@ -18,6 +18,7 @@ class ControlEngine {
   void clearBatteryMeasurement();
   void setTemperatureMeasurement(float temperatureC, bool valid,
                                  uint32_t nowMs);
+  void recoverPumpOverrun(uint32_t nowMs);
   void setFault();
 
   const OutputState& desiredOutputs() const { return outputs_; }
