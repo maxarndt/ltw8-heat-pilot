@@ -95,6 +95,11 @@ void NetworkService::startNetworkServices() {
   ArduinoOTA.setHostname(config::kHostname);
   ArduinoOTA.setPassword(config::kOtaPassword);
   ArduinoOTA.onStart([]() { Serial.println("[ota] update started"); });
+  // ArduinoOTA receives the complete image inside handle(). The Arduino loop
+  // task therefore cannot return to its usual watchdog feed point while an
+  // upload is in progress.
+  ArduinoOTA.onProgress(
+      [](const unsigned int, const unsigned int) { feedLoopWDT(); });
   ArduinoOTA.onEnd([]() { Serial.println("[ota] update complete"); });
   ArduinoOTA.onError([](const ota_error_t error) {
     Serial.printf("[ota] update failed error=%u\n", error);
