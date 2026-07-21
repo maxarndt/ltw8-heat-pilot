@@ -4,6 +4,7 @@
 #include <HardwareSerial.h>
 
 #include "Config.h"
+#include "FroniusBattery.h"
 #include "FroniusSmartMeter.h"
 
 struct CapturedModbusFrame {
@@ -31,6 +32,9 @@ class ModbusSniffer {
   const FroniusSmartMeterReading& smartMeterReading() const {
     return smartMeterDecoder_.reading();
   }
+  const FroniusBatteryReading& batteryReading() const {
+    return batteryDecoder_.reading();
+  }
   uint8_t recentFrameCount() const { return recentFrameCount_; }
   const CapturedModbusFrame& recentFrame(uint8_t newestFirstIndex) const;
   static void formatHex(const uint8_t* data, size_t length, char* target,
@@ -45,6 +49,7 @@ class ModbusSniffer {
   HardwareSerial serial_{1};
   ModbusSnifferStats stats_{};
   FroniusSmartMeterDecoder smartMeterDecoder_{};
+  FroniusBatteryDecoder batteryDecoder_{};
   CapturedModbusFrame recentFrames_[config::modbus::kRecentFrameCount]{};
   uint8_t receiveBuffer_[config::modbus::kMaximumFrameLength]{};
   uint16_t receiveLength_ = 0;

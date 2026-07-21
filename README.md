@@ -107,6 +107,17 @@ connected to automatic output control only while a valid reading not older than
 three seconds is available. A timeout immediately stops heating and retains the
 pump overrun.
 
+The BYD HVS+ status block is decoded from Modbus unit 21. Battery state of
+charge, power, voltage, and capacity are exposed under `battery`. Automatic
+heating requires battery data not older than 12 seconds. Up to 500 W of battery
+discharge is tolerated transiently for at most 15 seconds and no more than 2 Wh;
+exceeding either limit removes one heater phase. A value above 500 W removes one
+phase immediately. Another phase can only be removed after a new battery sample.
+
+The `modbus_sniffer` status includes CRC and overflow counters as well as
+`smart_meter_timeouts` and `battery_timeouts`. These counters are intended for
+later OTLP export.
+
 Set the manual outputs (heater phases 0 to 3, pump true or false):
 
 ```sh

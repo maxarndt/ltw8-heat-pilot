@@ -38,6 +38,8 @@ class Application {
   void disableSimulatedSurplus(uint32_t nowMs);
   ApplicationStatus status(uint32_t nowMs) const;
   bool simulatedSurplusEnabled() const { return simulatedSurplusEnabled_; }
+  uint32_t smartMeterTimeouts() const { return smartMeterTimeouts_; }
+  uint32_t batteryTimeouts() const { return batteryTimeouts_; }
   uint8_t temperatureSensorCount() const { return temperatures_.count(); }
   const TemperatureSensorReading& temperatureSensor(uint8_t index) const {
     return temperatures_.reading(index);
@@ -47,6 +49,9 @@ class Application {
   }
   const FroniusSmartMeterReading& smartMeterReading() const {
     return modbusSniffer_.smartMeterReading();
+  }
+  const FroniusBatteryReading& batteryReading() const {
+    return modbusSniffer_.batteryReading();
   }
   uint8_t recentModbusFrameCount() const {
     return modbusSniffer_.recentFrameCount();
@@ -61,6 +66,7 @@ class Application {
   bool syncOutputs();
   void updateTemperatureMeasurement(uint32_t nowMs);
   void updateSmartMeterMeasurement(uint32_t nowMs);
+  void updateBatteryMeasurement(uint32_t nowMs);
   void printStatus(uint32_t nowMs) const;
   static const char* toString(OperatingMode mode);
   static const char* toString(ApplicationState state);
@@ -68,8 +74,12 @@ class Application {
   uint32_t lastStatusAtMs_ = 0;
   uint32_t lastTemperatureMeasurementAtMs_ = 0;
   uint32_t lastSmartMeterMeasurementAtMs_ = 0;
+  uint32_t lastBatteryMeasurementAtMs_ = 0;
+  uint32_t smartMeterTimeouts_ = 0;
+  uint32_t batteryTimeouts_ = 0;
   bool temperatureStaleReported_ = false;
   bool smartMeterStaleReported_ = false;
+  bool batteryStaleReported_ = false;
   bool simulatedSurplusEnabled_ = false;
   Print& log_;
   OutputController& outputs_;

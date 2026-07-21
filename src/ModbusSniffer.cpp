@@ -78,6 +78,7 @@ void ModbusSniffer::finishFrame(const uint32_t nowMs) {
   if (crcValid) {
     ++stats_.validFrames;
     smartMeterDecoder_.processFrame(receiveBuffer_, receiveLength_, nowMs);
+    batteryDecoder_.processFrame(receiveBuffer_, receiveLength_, nowMs);
   } else {
     ++stats_.crcErrors;
   }
@@ -123,6 +124,12 @@ void ModbusSniffer::printSummary(const uint32_t nowMs) {
     log_.printf(" grid_power_w=%.1f observed_surplus_w=%.1f",
                 meter.realPowerDeciwatts / 10.0F,
                 -meter.realPowerDeciwatts / 10.0F);
+  }
+  const FroniusBatteryReading& battery = batteryDecoder_.reading();
+  if (battery.valid) {
+    log_.printf(" battery_soc=%.2f battery_power_w=%ld",
+                battery.stateOfChargeHundredths / 100.0F,
+                static_cast<long>(battery.powerW));
   }
   log_.println();
 }

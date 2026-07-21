@@ -7,6 +7,7 @@
 #include "ApiValidation.h"
 #include "Config.h"
 #include "ControlEngine.h"
+#include "FroniusBattery.h"
 #include "FroniusSmartMeter.h"
 #include "ModbusRtu.h"
 #include "OutputEncoding.h"
@@ -25,6 +26,7 @@ ControlEngine automaticEngine(const int32_t surplusW = 0,
   ControlEngine engine;
   engine.begin();
   engine.setSurplusMeasurement(surplusW);
+  engine.setBatteryMeasurement(8000, 0);
   engine.setTemperatureMeasurement(temperatureC, true, 0);
   engine.setTemperatureMeasurement(temperatureC, true, 0);
   TEST_ASSERT_TRUE(engine.setOperatingMode(OperatingMode::Automatic, 0));
@@ -59,6 +61,70 @@ void test_automatic_waits_for_measurements() {
   TEST_ASSERT_EQUAL_INT(static_cast<int>(ApplicationState::WaitingForData),
                         static_cast<int>(engine.snapshot(0).state));
   assertOutputs(engine, 0, false);
+}
+
+void test_missing_battery_measurement_stops_heating_safely() {
+  ControlEngine engine = automaticEngine(1700);
+  engine.update(0);
+  engine.update(config::control::kPhaseChangeStableMs);
+  assertOutputs(engine, 1, true);
+
+  engine.clearBatteryMeasurement();
+  engine.update(config::control::kPhaseChangeStableMs + 1U);
+  assertOutputs(engine, 0, true);
+  TEST_ASSERT_FALSE(
+      engine.snapshot(config::control::kPhaseChangeStableMs + 1U)
+          .measurementsValid);
+}
+
+ControlEngine twoPhaseEngine() {
+  ControlEngine engine = automaticEngine(5000);
+  engine.update(0);
+  engine.update(30000);
+  engine.update(30001);
+  engine.update(60001);
+  TEST_ASSERT_EQUAL_UINT8(2, engine.desiredOutputs().heaterPhases);
+  engine.setSurplusMeasurement(0);
+  return engine;
+}
+
+void test_small_battery_discharge_is_tolerated_for_15_seconds() {
+  ControlEngine engine = twoPhaseEngine();
+  engine.setBatteryMeasurement(8000, 400);
+  engine.update(60002);
+  engine.update(75001);
+  assertOutputs(engine, 2, true);
+  engine.update(75002);
+  assertOutputs(engine, 1, true);
+}
+
+void test_battery_discharge_energy_budget_reduces_phase() {
+  ControlEngine engine = twoPhaseEngine();
+  engine.setBatteryMeasurement(8000, 500);
+  engine.update(60002);
+  engine.update(74402);
+  assertOutputs(engine, 1, true);
+}
+
+void test_high_battery_discharge_reduces_only_once_per_sample() {
+  ControlEngine engine = twoPhaseEngine();
+  engine.setBatteryMeasurement(8000, 501);
+  engine.update(60002);
+  assertOutputs(engine, 1, true);
+
+  engine.update(60003);
+  assertOutputs(engine, 1, true);
+  engine.setBatteryMeasurement(8000, 501);
+  engine.update(60004);
+  assertOutputs(engine, 0, true);
+}
+
+void test_battery_charging_does_not_reduce_phases() {
+  ControlEngine engine = twoPhaseEngine();
+  engine.setBatteryMeasurement(8000, -2000);
+  engine.update(60002);
+  engine.update(90002);
+  assertOutputs(engine, 2, true);
 }
 
 void test_lost_surplus_measurement_stops_heating_safely() {
@@ -332,6 +398,7 @@ void test_temperature_fault_requires_two_valid_samples_to_recover() {
   ControlEngine engine;
   engine.begin();
   engine.setSurplusMeasurement(0);
+  engine.setBatteryMeasurement(8000, 0);
   TEST_ASSERT_TRUE(engine.setOperatingMode(OperatingMode::Automatic, 0));
   engine.update(config::control::kTemperatureFaultDelayMs);
 
@@ -534,12 +601,56 @@ void test_fronius_smart_meter_freshness_and_surplus_conversion() {
   TEST_ASSERT_EQUAL_INT32(0, froniusGridPowerToSurplusWatts(0));
 }
 
+void test_fronius_battery_decodes_captured_register_layout() {
+  const uint8_t request[] = {0x15, 0x03, 0x01, 0x90,
+                             0x00, 0x1E, 0xC7, 0x07};
+  uint8_t response[65]{};
+  response[0] = 0x15;
+  response[1] = 0x03;
+  response[2] = 0x3C;
+  const uint16_t registers[] = {
+      3, 0, 129, 8210, 0, 7675, 0, 6300, 0, 7200,
+      0, 7700, 3250, 0xFFFF, 0xF72A, 3246, 0xFFFF, 0xF72D};
+  for (size_t index = 0; index < sizeof(registers) / sizeof(registers[0]);
+       ++index) {
+    response[3 + index * 2U] = static_cast<uint8_t>(registers[index] >> 8U);
+    response[4 + index * 2U] = static_cast<uint8_t>(registers[index]);
+  }
+  const uint16_t crc = modbusRtuCrc16(response, sizeof(response) - 2U);
+  response[sizeof(response) - 2U] = static_cast<uint8_t>(crc);
+  response[sizeof(response) - 1U] = static_cast<uint8_t>(crc >> 8U);
+
+  FroniusBatteryDecoder decoder;
+  TEST_ASSERT_FALSE(decoder.processFrame(request, sizeof(request), 100));
+  TEST_ASSERT_TRUE(decoder.processFrame(response, sizeof(response), 110));
+  const FroniusBatteryReading& reading = decoder.reading();
+  TEST_ASSERT_TRUE(reading.valid);
+  TEST_ASSERT_EQUAL_UINT16(8210, reading.stateOfChargeHundredths);
+  TEST_ASSERT_EQUAL_UINT32(7675, reading.totalCapacityWh);
+  TEST_ASSERT_EQUAL_INT32(-2262, reading.powerW);
+  TEST_ASSERT_EQUAL_INT32(-2259, reading.internalPowerW);
+  TEST_ASSERT_EQUAL_UINT16(3250, reading.voltageDecivolts);
+}
+
+void test_fronius_battery_freshness_handles_wraparound() {
+  FroniusBatteryReading reading;
+  reading.valid = true;
+  reading.measuredAtMs = UINT32_MAX - 100U;
+  TEST_ASSERT_TRUE(isFroniusBatteryFresh(reading, 99, 200));
+  TEST_ASSERT_FALSE(isFroniusBatteryFresh(reading, 100, 200));
+}
+
 }  // namespace
 
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_starts_disabled_and_safe);
   RUN_TEST(test_automatic_waits_for_measurements);
+  RUN_TEST(test_missing_battery_measurement_stops_heating_safely);
+  RUN_TEST(test_small_battery_discharge_is_tolerated_for_15_seconds);
+  RUN_TEST(test_battery_discharge_energy_budget_reduces_phase);
+  RUN_TEST(test_high_battery_discharge_reduces_only_once_per_sample);
+  RUN_TEST(test_battery_charging_does_not_reduce_phases);
   RUN_TEST(test_lost_surplus_measurement_stops_heating_safely);
   RUN_TEST(test_phase_requires_stable_surplus_and_forces_pump);
   RUN_TEST(test_phases_are_added_one_at_a_time);
@@ -570,5 +681,7 @@ int main() {
   RUN_TEST(test_fronius_smart_meter_requires_matching_request_and_valid_crc);
   RUN_TEST(test_fronius_smart_meter_decodes_phase_values);
   RUN_TEST(test_fronius_smart_meter_freshness_and_surplus_conversion);
+  RUN_TEST(test_fronius_battery_decodes_captured_register_layout);
+  RUN_TEST(test_fronius_battery_freshness_handles_wraparound);
   return UNITY_END();
 }

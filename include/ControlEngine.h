@@ -13,6 +13,9 @@ class ControlEngine {
   bool setOperatingMode(OperatingMode mode, uint32_t nowMs);
   void setSurplusMeasurement(int32_t surplusW);
   void clearSurplusMeasurement();
+  void setBatteryMeasurement(uint16_t stateOfChargeHundredths,
+                             int32_t powerW);
+  void clearBatteryMeasurement();
   void setTemperatureMeasurement(float temperatureC, bool valid,
                                  uint32_t nowMs);
   void setFault();
@@ -24,6 +27,8 @@ class ControlEngine {
   void updateAutomatic(uint32_t nowMs);
   void updateManual(uint32_t nowMs);
   void updatePumpOverrun(uint32_t nowMs);
+  bool updateBatteryDischargeProtection(uint32_t nowMs);
+  void resetBatteryDischargeTracking();
   void applyHeaterPhases(uint8_t phases, uint32_t nowMs);
   void stopHeatingWithPumpOverrun(uint32_t nowMs);
   void startPumpOverrun(uint32_t nowMs);
@@ -48,6 +53,7 @@ class ControlEngine {
   uint32_t phaseCandidateSinceMs_ = 0;
   bool temperatureLockout_ = false;
   bool surplusValid_ = false;
+  bool batteryValid_ = false;
   bool temperatureValid_ = false;
   bool temperatureFault_ = false;
   bool temperatureSampleSeen_ = false;
@@ -56,5 +62,12 @@ class ControlEngine {
   uint32_t lastTemperatureSampleAtMs_ = 0;
   uint32_t temperatureUnavailableSinceMs_ = 0;
   int32_t surplusW_ = 0;
+  uint16_t batteryStateOfChargeHundredths_ = 0;
+  int32_t batteryPowerW_ = 0;
+  bool batteryDischargeTrackingActive_ = false;
+  bool batteryProtectionWaitingForNewSample_ = false;
+  uint32_t batteryDischargeStartedAtMs_ = 0;
+  uint32_t batteryDischargeLastIntegratedAtMs_ = 0;
+  uint64_t batteryDischargeWattMilliseconds_ = 0;
   float temperatureC_ = 0.0F;
 };

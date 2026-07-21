@@ -85,6 +85,8 @@ void HttpApi::handleStatus() {
   sniffer["valid_frames"] = snifferStats.validFrames;
   sniffer["crc_errors"] = snifferStats.crcErrors;
   sniffer["overflows"] = snifferStats.overflows;
+  sniffer["smart_meter_timeouts"] = application_.smartMeterTimeouts();
+  sniffer["battery_timeouts"] = application_.batteryTimeouts();
 
   JsonObject smartMeter = response["smart_meter"].to<JsonObject>();
   smartMeter["unit_id"] = 1;
@@ -123,6 +125,25 @@ void HttpApi::handleStatus() {
           reading.reactivePowerDecivars / 10.0F;
       phase["power_factor"] = reading.powerFactorMilli / 1000.0F;
     }
+  }
+
+  const FroniusBatteryReading& battery = application_.batteryReading();
+  JsonObject batteryJson = response["battery"].to<JsonObject>();
+  const bool batteryFresh = isFroniusBatteryFresh(
+      battery, status.uptimeMs, config::modbus::kBatteryStaleMs);
+  batteryJson["unit_id"] = 21;
+  batteryJson["valid"] = battery.valid;
+  batteryJson["fresh"] = batteryFresh;
+  if (battery.valid) {
+    batteryJson["measured_at_ms"] = battery.measuredAtMs;
+    batteryJson["status"] = battery.status;
+    batteryJson["mode"] = battery.mode;
+    batteryJson["state_of_charge_percent"] =
+        battery.stateOfChargeHundredths / 100.0F;
+    batteryJson["power_w"] = battery.powerW;
+    batteryJson["internal_power_w"] = battery.internalPowerW;
+    batteryJson["voltage_v"] = battery.voltageDecivolts / 10.0F;
+    batteryJson["total_capacity_wh"] = battery.totalCapacityWh;
   }
   JsonArray recentFrames = sniffer["recent_frames"].to<JsonArray>();
   for (uint8_t index = 0; index < application_.recentModbusFrameCount();

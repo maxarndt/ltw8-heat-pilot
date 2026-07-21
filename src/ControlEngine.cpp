@@ -15,6 +15,7 @@ void ControlEngine::begin() {
   phaseCandidateSinceMs_ = 0;
   temperatureLockout_ = false;
   surplusValid_ = false;
+  batteryValid_ = false;
   temperatureValid_ = false;
   temperatureFault_ = false;
   temperatureSampleSeen_ = false;
@@ -23,6 +24,10 @@ void ControlEngine::begin() {
   lastTemperatureSampleAtMs_ = 0;
   temperatureUnavailableSinceMs_ = 0;
   surplusW_ = 0;
+  batteryStateOfChargeHundredths_ = 0;
+  batteryPowerW_ = 0;
+  batteryProtectionWaitingForNewSample_ = false;
+  resetBatteryDischargeTracking();
   temperatureC_ = 0.0F;
 }
 
@@ -119,6 +124,20 @@ void ControlEngine::setSurplusMeasurement(const int32_t surplusW) {
 
 void ControlEngine::clearSurplusMeasurement() { surplusValid_ = false; }
 
+void ControlEngine::setBatteryMeasurement(
+    const uint16_t stateOfChargeHundredths, const int32_t powerW) {
+  batteryStateOfChargeHundredths_ = stateOfChargeHundredths;
+  batteryPowerW_ = powerW;
+  batteryValid_ = true;
+  batteryProtectionWaitingForNewSample_ = false;
+}
+
+void ControlEngine::clearBatteryMeasurement() {
+  batteryValid_ = false;
+  batteryProtectionWaitingForNewSample_ = false;
+  resetBatteryDischargeTracking();
+}
+
 void ControlEngine::setTemperatureMeasurement(const float temperatureC,
                                               const bool valid,
                                               const uint32_t nowMs) {
@@ -165,7 +184,7 @@ ControlSnapshot ControlEngine::snapshot(const uint32_t nowMs) const {
       manualTimeoutRemaining(nowMs),
       pumpOverrunRemaining(nowMs),
       phaseChangeRemaining(nowMs),
-      surplusValid_ && temperatureUsable(nowMs),
+      surplusValid_ && batteryValid_ && temperatureUsable(nowMs),
       temperatureUsable(nowMs),
       temperatureFault_,
       surplusW_,
@@ -196,6 +215,18 @@ void ControlEngine::updateAutomatic(const uint32_t nowMs) {
     return;
   }
 
+  if (!batteryValid_) {
+    clearPhaseCandidate();
+    resetBatteryDischargeTracking();
+    if (outputs_.heaterPhases > 0) {
+      stopHeatingWithPumpOverrun(nowMs);
+    }
+    if (!pumpOverrunActive_) {
+      state_ = ApplicationState::WaitingForData;
+    }
+    return;
+  }
+
   if (temperatureC_ >= config::control::kTargetTemperatureC) {
     temperatureLockout_ = true;
   } else if (temperatureLockout_ &&
@@ -212,6 +243,10 @@ void ControlEngine::updateAutomatic(const uint32_t nowMs) {
     if (!pumpOverrunActive_) {
       state_ = ApplicationState::TemperatureHold;
     }
+    return;
+  }
+
+  if (updateBatteryDischargeProtection(nowMs)) {
     return;
   }
 
@@ -296,8 +331,58 @@ void ControlEngine::updatePumpOverrun(const uint32_t nowMs) {
   }
 }
 
+bool ControlEngine::updateBatteryDischargeProtection(const uint32_t nowMs) {
+  if (outputs_.heaterPhases == 0 || batteryPowerW_ <= 0) {
+    resetBatteryDischargeTracking();
+    return false;
+  }
+  if (batteryProtectionWaitingForNewSample_) {
+    return false;
+  }
+
+  bool limitExceeded =
+      batteryPowerW_ > config::battery::kTransientDischargeLimitW;
+  if (!batteryDischargeTrackingActive_) {
+    batteryDischargeTrackingActive_ = true;
+    batteryDischargeStartedAtMs_ = nowMs;
+    batteryDischargeLastIntegratedAtMs_ = nowMs;
+    batteryDischargeWattMilliseconds_ = 0;
+  } else {
+    const uint32_t elapsedMs = nowMs - batteryDischargeLastIntegratedAtMs_;
+    batteryDischargeLastIntegratedAtMs_ = nowMs;
+    batteryDischargeWattMilliseconds_ +=
+        static_cast<uint64_t>(batteryPowerW_) * elapsedMs;
+  }
+
+  limitExceeded =
+      limitExceeded ||
+      nowMs - batteryDischargeStartedAtMs_ >=
+          config::battery::kTransientDischargeMaximumMs ||
+      batteryDischargeWattMilliseconds_ >=
+          config::battery::kTransientDischargeBudgetWattMilliseconds;
+  if (!limitExceeded) {
+    return false;
+  }
+
+  clearPhaseCandidate();
+  const uint8_t reducedPhases = outputs_.heaterPhases - 1U;
+  applyHeaterPhases(reducedPhases, nowMs);
+  resetBatteryDischargeTracking();
+  batteryProtectionWaitingForNewSample_ = true;
+  return true;
+}
+
+void ControlEngine::resetBatteryDischargeTracking() {
+  batteryDischargeTrackingActive_ = false;
+  batteryDischargeStartedAtMs_ = 0;
+  batteryDischargeLastIntegratedAtMs_ = 0;
+  batteryDischargeWattMilliseconds_ = 0;
+}
+
 void ControlEngine::applyHeaterPhases(const uint8_t phases,
                                       const uint32_t nowMs) {
+  resetBatteryDischargeTracking();
+  batteryProtectionWaitingForNewSample_ = false;
   if (phases > 0) {
     outputs_ = {phases, true};
     pumpOverrunActive_ = false;
@@ -345,6 +430,9 @@ ApplicationState ControlEngine::automaticIdleState(
     return temperatureUnavailableState();
   }
   if (!surplusValid_) {
+    return ApplicationState::WaitingForData;
+  }
+  if (!batteryValid_) {
     return ApplicationState::WaitingForData;
   }
   return temperatureLockout_ ? ApplicationState::TemperatureHold

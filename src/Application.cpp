@@ -26,6 +26,7 @@ void Application::update(const uint32_t nowMs) {
   temperatures_.update(nowMs);
   updateTemperatureMeasurement(nowMs);
   updateSmartMeterMeasurement(nowMs);
+  updateBatteryMeasurement(nowMs);
   const OutputState before = control_.desiredOutputs();
   control_.update(nowMs);
   if (control_.desiredOutputs() != before && !syncOutputs()) {
@@ -66,6 +67,7 @@ bool Application::setOperatingMode(const OperatingMode mode,
 void Application::setSimulatedSurplus(const int32_t surplusW) {
   simulatedSurplusEnabled_ = true;
   control_.setSurplusMeasurement(surplusW);
+  control_.setBatteryMeasurement(10000, 0);
 }
 
 void Application::disableSimulatedSurplus(const uint32_t nowMs) {
@@ -73,6 +75,9 @@ void Application::disableSimulatedSurplus(const uint32_t nowMs) {
   lastSmartMeterMeasurementAtMs_ = 0;
   smartMeterStaleReported_ = false;
   updateSmartMeterMeasurement(nowMs);
+  lastBatteryMeasurementAtMs_ = 0;
+  batteryStaleReported_ = false;
+  updateBatteryMeasurement(nowMs);
 }
 
 ApplicationStatus Application::status(const uint32_t nowMs) const {
@@ -148,6 +153,7 @@ void Application::updateSmartMeterMeasurement(const uint32_t nowMs) {
     control_.clearSurplusMeasurement();
     if (!smartMeterStaleReported_) {
       smartMeterStaleReported_ = true;
+      ++smartMeterTimeouts_;
       log_.println("[smart-meter] measurement timed out; surplus invalid");
     }
     return;
@@ -158,6 +164,32 @@ void Application::updateSmartMeterMeasurement(const uint32_t nowMs) {
     smartMeterStaleReported_ = false;
     control_.setSurplusMeasurement(
         froniusGridPowerToSurplusWatts(meter.realPowerDeciwatts));
+  }
+}
+
+void Application::updateBatteryMeasurement(const uint32_t nowMs) {
+  if (simulatedSurplusEnabled_) {
+    return;
+  }
+
+  const FroniusBatteryReading& battery = modbusSniffer_.batteryReading();
+  if (!battery.valid ||
+      !isFroniusBatteryFresh(battery, nowMs,
+                             config::modbus::kBatteryStaleMs)) {
+    control_.clearBatteryMeasurement();
+    if (battery.valid && !batteryStaleReported_) {
+      batteryStaleReported_ = true;
+      ++batteryTimeouts_;
+      log_.println("[battery] measurement timed out; battery data invalid");
+    }
+    return;
+  }
+
+  if (battery.measuredAtMs != lastBatteryMeasurementAtMs_) {
+    lastBatteryMeasurementAtMs_ = battery.measuredAtMs;
+    batteryStaleReported_ = false;
+    control_.setBatteryMeasurement(battery.stateOfChargeHundredths,
+                                   battery.powerW);
   }
 }
 

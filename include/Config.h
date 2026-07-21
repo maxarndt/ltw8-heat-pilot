@@ -50,7 +50,15 @@ constexpr uint16_t kMaximumFrameLength = 256;
 constexpr uint8_t kRecentFrameCount = 4;
 constexpr uint32_t kLogIntervalMs = 5000;
 constexpr uint32_t kSmartMeterStaleMs = 3000;
+constexpr uint32_t kBatteryStaleMs = 12000;
 }  // namespace modbus
+
+namespace battery {
+constexpr int32_t kTransientDischargeLimitW = 500;
+constexpr uint32_t kTransientDischargeMaximumMs = 15000;
+constexpr uint64_t kTransientDischargeBudgetWattMilliseconds =
+    2ULL * 3600ULL * 1000ULL;
+}  // namespace battery
 
 namespace ethernet {
 constexpr int8_t kInterruptPin = 12;
