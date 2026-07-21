@@ -14,7 +14,7 @@ namespace {
 constexpr uint32_t kRetainedStageMagic = 0x48505354;
 RTC_DATA_ATTR uint32_t retainedStageMagic;
 RTC_DATA_ATTR uint8_t retainedStage;
-RTC_DATA_ATTR RetainedOperationalState retainedOperationalState;
+RTC_NOINIT_ATTR RetainedOperationalState retainedOperationalState;
 
 NetworkService network;
 LogOutput logOutput(network);
