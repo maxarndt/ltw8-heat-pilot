@@ -340,7 +340,8 @@ void ControlEngine::updatePumpOverrun(const uint32_t nowMs) {
 }
 
 bool ControlEngine::updateBatteryDischargeProtection(const uint32_t nowMs) {
-  if (outputs_.heaterPhases == 0 || batteryPowerW_ <= 0) {
+  if (outputs_.heaterPhases == 0 ||
+      batteryPowerW_ <= config::battery::kDischargeIgnoreThresholdW) {
     resetBatteryDischargeTracking();
     return false;
   }

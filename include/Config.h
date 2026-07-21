@@ -58,6 +58,7 @@ constexpr uint32_t kBatteryStaleMs = 12000;
 }  // namespace modbus
 
 namespace battery {
+constexpr int32_t kDischargeIgnoreThresholdW = 100;
 constexpr int32_t kTransientDischargeLimitW = 500;
 constexpr uint32_t kTransientDischargeMaximumMs = 15000;
 constexpr uint64_t kTransientDischargeBudgetWattMilliseconds =

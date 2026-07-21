@@ -135,6 +135,23 @@ void test_small_battery_discharge_is_tolerated_for_15_seconds() {
   assertOutputs(engine, 1, true);
 }
 
+void test_battery_idle_power_at_deadband_is_ignored() {
+  ControlEngine engine = twoPhaseEngine();
+  constexpr uint32_t startedAtMs = 60002;
+  engine.setBatteryMeasurement(
+      8000, config::battery::kDischargeIgnoreThresholdW);
+  engine.update(startedAtMs);
+  engine.update(startedAtMs + 60000U);
+  assertOutputs(engine, 2, true);
+
+  engine.setBatteryMeasurement(
+      8000, config::battery::kDischargeIgnoreThresholdW + 1);
+  engine.update(startedAtMs + 60001U);
+  engine.update(startedAtMs + 60001U +
+                config::battery::kTransientDischargeMaximumMs);
+  assertOutputs(engine, 1, true);
+}
+
 void test_battery_discharge_energy_budget_reduces_phase() {
   ControlEngine engine = twoPhaseEngine();
   engine.setBatteryMeasurement(8000, 500);
@@ -774,6 +791,7 @@ int main() {
   RUN_TEST(test_automatic_waits_for_measurements);
   RUN_TEST(test_missing_battery_measurement_stops_heating_safely);
   RUN_TEST(test_small_battery_discharge_is_tolerated_for_15_seconds);
+  RUN_TEST(test_battery_idle_power_at_deadband_is_ignored);
   RUN_TEST(test_battery_discharge_energy_budget_reduces_phase);
   RUN_TEST(test_high_battery_discharge_reduces_only_once_per_sample);
   RUN_TEST(test_battery_charging_does_not_reduce_phases);
