@@ -91,6 +91,22 @@ their unique addresses and readings in `temperature_sensors`. Sensor positions
 such as buffer top, middle, and bottom will be assigned to these addresses after
 installation.
 
+The onboard isolated RS485 interface runs as a strictly receive-only Modbus RTU
+sniffer on GPIO18 at 9600 baud, 8N1. GPIO21 is held in receive mode and no UART
+TX pin is assigned. Sniffer counters and the four most recent frames are exposed
+under `modbus_sniffer` in the status response. The sniffer is diagnostic only;
+captured data does not yet influence control. When attached in parallel to an
+existing bus, termination must match the existing topology. In the current
+installation the Heat Pilot replaces a terminated Ohmpilot endpoint, so its
+120-ohm termination remains enabled.
+
+Decoded Fronius Smart Meter TS 65A-3 observations are exposed under
+`smart_meter`. A negative `grid_power_w` means grid export; the corresponding
+positive value is reported as `observed_surplus_w`. These observations are not
+connected to automatic output control only while a valid reading not older than
+three seconds is available. A timeout immediately stops heating and retains the
+pump overrun.
+
 Set the manual outputs (heater phases 0 to 3, pump true or false):
 
 ```sh
@@ -119,6 +135,14 @@ overridden through the simulation endpoint. Heating is inhibited until all
 detected sensors have produced two consecutive valid readings. Missing,
 invalid, or stale readings stop the heater immediately and retain the pump
 overrun.
+
+The simulation overrides the physical Smart Meter until it is disabled again:
+
+```sh
+curl -X PUT http://heat-pilot.local/api/v1/simulation \
+  -H 'Content-Type: application/json' \
+  -d '{"enabled":false}'
+```
 
 Enable automatic mode:
 

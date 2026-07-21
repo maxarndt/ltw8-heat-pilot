@@ -4,6 +4,7 @@
 
 #include "ApiValidation.h"
 #include "Application.h"
+#include "Config.h"
 
 void HttpApi::update(const bool networkOnline) {
   if (networkOnline && !started_) {
@@ -47,6 +48,13 @@ void HttpApi::handleStatus() {
   response["temperature_valid"] = status.temperatureValid;
   response["temperature_fault"] = status.temperatureFault;
   response["surplus_w"] = status.surplusW;
+  const FroniusSmartMeterReading& meter = application_.smartMeterReading();
+  const bool smartMeterFresh = isFroniusSmartMeterSummaryFresh(
+      meter, status.uptimeMs, config::modbus::kSmartMeterStaleMs);
+  response["surplus_source"] =
+      application_.simulatedSurplusEnabled()
+          ? "simulation"
+          : (smartMeterFresh ? "smart_meter" : "unavailable");
   response["temperature_c"] = status.temperatureC;
 
   JsonArray temperatureSensors =
@@ -67,6 +75,70 @@ void HttpApi::handleStatus() {
     } else {
       sensor["temperature_c"] = nullptr;
     }
+  }
+
+  const ModbusSnifferStats& snifferStats = application_.modbusSnifferStats();
+  JsonObject sniffer = response["modbus_sniffer"].to<JsonObject>();
+  sniffer["mode"] = "receive_only";
+  sniffer["baud"] = config::modbus::kBaudRate;
+  sniffer["frames"] = snifferStats.frames;
+  sniffer["valid_frames"] = snifferStats.validFrames;
+  sniffer["crc_errors"] = snifferStats.crcErrors;
+  sniffer["overflows"] = snifferStats.overflows;
+
+  JsonObject smartMeter = response["smart_meter"].to<JsonObject>();
+  smartMeter["unit_id"] = 1;
+  smartMeter["summary_valid"] = meter.summaryValid;
+  smartMeter["phases_valid"] = meter.phasesValid;
+  smartMeter["fresh"] = smartMeterFresh;
+  if (meter.summaryValid) {
+    smartMeter["measured_at_ms"] = meter.summaryMeasuredAtMs;
+    smartMeter["voltage_v"] = meter.voltageDecivolts / 10.0F;
+    smartMeter["voltage_phase_to_phase_v"] =
+        meter.voltagePhaseToPhaseDecivolts / 10.0F;
+    smartMeter["grid_power_w"] = meter.realPowerDeciwatts / 10.0F;
+    smartMeter["observed_surplus_w"] =
+        -meter.realPowerDeciwatts / 10.0F;
+    smartMeter["apparent_power_va"] =
+        meter.apparentPowerDecivoltAmps / 10.0F;
+    smartMeter["reactive_power_var"] =
+        meter.reactivePowerDecivars / 10.0F;
+    smartMeter["power_factor"] = meter.powerFactorMilli / 1000.0F;
+    smartMeter["frequency_hz"] = meter.frequencyDecihertz / 10.0F;
+  }
+  JsonArray phases = smartMeter["phases"].to<JsonArray>();
+  if (meter.phasesValid) {
+    for (uint8_t index = 0; index < 3; ++index) {
+      const FroniusSmartMeterPhaseReading& reading = meter.phases[index];
+      JsonObject phase = phases.add<JsonObject>();
+      phase["phase"] = index + 1;
+      phase["voltage_v"] = reading.voltageDecivolts / 10.0F;
+      phase["voltage_phase_to_phase_v"] =
+          reading.voltagePhaseToPhaseDecivolts / 10.0F;
+      phase["current_a"] = reading.currentMilliamps / 1000.0F;
+      phase["real_power_w"] = reading.realPowerDeciwatts / 10.0F;
+      phase["apparent_power_va"] =
+          reading.apparentPowerDecivoltAmps / 10.0F;
+      phase["reactive_power_var"] =
+          reading.reactivePowerDecivars / 10.0F;
+      phase["power_factor"] = reading.powerFactorMilli / 1000.0F;
+    }
+  }
+  JsonArray recentFrames = sniffer["recent_frames"].to<JsonArray>();
+  for (uint8_t index = 0; index < application_.recentModbusFrameCount();
+       ++index) {
+    const CapturedModbusFrame& frame = application_.recentModbusFrame(index);
+    JsonObject item = recentFrames.add<JsonObject>();
+    item["captured_at_ms"] = frame.capturedAtMs;
+    item["length"] = frame.length;
+    item["crc_valid"] = frame.crcValid;
+    if (frame.length >= 2) {
+      item["unit_id"] = frame.data[0];
+      item["function"] = frame.data[1];
+    }
+    char hex[config::modbus::kMaximumFrameLength * 2U + 1U];
+    ModbusSniffer::formatHex(frame.data, frame.length, hex, sizeof(hex));
+    item["hex"] = hex;
   }
 
   String body;
@@ -151,6 +223,12 @@ void HttpApi::handleSimulation() {
   JsonDocument request;
   if (deserializeJson(request, server_.arg("plain"))) {
     sendError(400, "invalid_json", "Request body must be valid JSON");
+    return;
+  }
+  if (request["enabled"].is<bool>() && !request["enabled"].as<bool>()) {
+    application_.disableSimulatedSurplus(millis());
+    log_.println("[simulation] disabled; using smart meter");
+    handleStatus();
     return;
   }
   if (!request["surplus_w"].is<int>()) {

@@ -7,6 +7,8 @@
 #include "ApiValidation.h"
 #include "Config.h"
 #include "ControlEngine.h"
+#include "FroniusSmartMeter.h"
+#include "ModbusRtu.h"
 #include "OutputEncoding.h"
 #include "TemperaturePolicy.h"
 
@@ -57,6 +59,25 @@ void test_automatic_waits_for_measurements() {
   TEST_ASSERT_EQUAL_INT(static_cast<int>(ApplicationState::WaitingForData),
                         static_cast<int>(engine.snapshot(0).state));
   assertOutputs(engine, 0, false);
+}
+
+void test_lost_surplus_measurement_stops_heating_safely() {
+  ControlEngine engine = automaticEngine(1700);
+  engine.update(0);
+  engine.update(config::control::kPhaseChangeStableMs);
+  assertOutputs(engine, 1, true);
+
+  engine.clearSurplusMeasurement();
+  engine.update(config::control::kPhaseChangeStableMs + 1U);
+  assertOutputs(engine, 0, true);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(ApplicationState::PumpOverrun),
+                        static_cast<int>(
+                            engine.snapshot(config::control::kPhaseChangeStableMs +
+                                            1U)
+                                .state));
+  TEST_ASSERT_FALSE(
+      engine.snapshot(config::control::kPhaseChangeStableMs + 1U)
+          .measurementsValid);
 }
 
 void test_phase_requires_stable_surplus_and_forces_pump() {
@@ -403,12 +424,123 @@ void test_temperature_api_validation() {
       isValidTemperature(-std::numeric_limits<float>::infinity()));
 }
 
+void test_modbus_crc_accepts_official_request_and_response_examples() {
+  const uint8_t request[] = {0x01, 0x03, 0x9C, 0x44,
+                             0x00, 0x04, 0x2A, 0x4C};
+  const uint8_t response[] = {0x01, 0x03, 0x08, 0x46, 0x72,
+                              0x6F, 0x6E, 0x69, 0x75, 0x73,
+                              0x00, 0x8A, 0x2A};
+
+  TEST_ASSERT_EQUAL_HEX16(0x4C2A, modbusRtuCrc16(request, 6));
+  TEST_ASSERT_TRUE(hasValidModbusRtuCrc(request, sizeof(request)));
+  TEST_ASSERT_TRUE(hasValidModbusRtuCrc(response, sizeof(response)));
+}
+
+void test_modbus_crc_rejects_corruption_and_short_frames() {
+  uint8_t frame[] = {0x01, 0x03, 0x9C, 0x44,
+                     0x00, 0x04, 0x2A, 0x4C};
+  frame[3] ^= 0x01;
+
+  TEST_ASSERT_FALSE(hasValidModbusRtuCrc(frame, sizeof(frame)));
+  TEST_ASSERT_FALSE(hasValidModbusRtuCrc(frame, 3));
+}
+
+void test_fronius_smart_meter_decodes_captured_summary() {
+  const uint8_t request[] = {0x01, 0x03, 0x01, 0x02,
+                             0x00, 0x10, 0xE4, 0x3A};
+  const uint8_t response[] = {
+      0x01, 0x03, 0x20, 0x09, 0x28, 0x00, 0x00, 0x0F, 0xDC, 0x00,
+      0x00, 0xF9, 0x1C, 0xFF, 0xFF, 0x76, 0x19, 0x00, 0x00, 0xEA,
+      0xFA, 0xFF, 0xFF, 0xFF, 0xCA, 0xFF, 0xFF, 0x00, 0x00, 0x00,
+      0x00, 0x01, 0xF4, 0x00, 0x00, 0xF5, 0xD0};
+
+  FroniusSmartMeterDecoder decoder;
+  TEST_ASSERT_FALSE(decoder.processFrame(request, sizeof(request), 100));
+  TEST_ASSERT_TRUE(decoder.processFrame(response, sizeof(response), 110));
+
+  const FroniusSmartMeterReading& reading = decoder.reading();
+  TEST_ASSERT_TRUE(reading.summaryValid);
+  TEST_ASSERT_EQUAL_UINT32(110, reading.summaryMeasuredAtMs);
+  TEST_ASSERT_EQUAL_INT32(2344, reading.voltageDecivolts);
+  TEST_ASSERT_EQUAL_INT32(4060, reading.voltagePhaseToPhaseDecivolts);
+  TEST_ASSERT_EQUAL_INT32(-1764, reading.realPowerDeciwatts);
+  TEST_ASSERT_EQUAL_INT32(500, reading.frequencyDecihertz);
+}
+
+void test_fronius_smart_meter_requires_matching_request_and_valid_crc() {
+  const uint8_t request[] = {0x01, 0x03, 0x01, 0x02,
+                             0x00, 0x10, 0xE4, 0x3A};
+  uint8_t response[] = {
+      0x01, 0x03, 0x20, 0x09, 0x28, 0x00, 0x00, 0x0F, 0xDC, 0x00,
+      0x00, 0xF9, 0x1C, 0xFF, 0xFF, 0x76, 0x19, 0x00, 0x00, 0xEA,
+      0xFA, 0xFF, 0xFF, 0xFF, 0xCA, 0xFF, 0xFF, 0x00, 0x00, 0x00,
+      0x00, 0x01, 0xF4, 0x00, 0x00, 0xF5, 0xD0};
+
+  FroniusSmartMeterDecoder decoder;
+  TEST_ASSERT_FALSE(decoder.processFrame(response, sizeof(response), 100));
+  TEST_ASSERT_FALSE(decoder.reading().summaryValid);
+  TEST_ASSERT_FALSE(decoder.processFrame(request, sizeof(request), 101));
+  response[5] ^= 0x01;
+  TEST_ASSERT_FALSE(decoder.processFrame(response, sizeof(response), 102));
+  TEST_ASSERT_FALSE(decoder.reading().summaryValid);
+}
+
+void test_fronius_smart_meter_decodes_phase_values() {
+  const uint8_t request[] = {0x01, 0x03, 0x01, 0x1E,
+                             0x00, 0x2A, 0xA5, 0xEF};
+  uint8_t response[89]{};
+  response[0] = 0x01;
+  response[1] = 0x03;
+  response[2] = 0x54;
+  const uint8_t phaseOne[] = {
+      0x0F, 0xE3, 0x00, 0x00, 0x09, 0x2B, 0x00, 0x00,
+      0xF2, 0xC1, 0xFF, 0xFF, 0xE2, 0x42, 0xFF, 0xFF,
+      0x1E, 0xD8, 0x00, 0x00, 0xF7, 0xD6, 0xFF, 0xFF,
+      0xFC, 0x48, 0xFF, 0xFF};
+  for (size_t index = 0; index < sizeof(phaseOne); ++index) {
+    response[3 + index] = phaseOne[index];
+  }
+  const uint16_t crc = modbusRtuCrc16(response, sizeof(response) - 2U);
+  response[sizeof(response) - 2U] = static_cast<uint8_t>(crc & 0xFFU);
+  response[sizeof(response) - 1U] = static_cast<uint8_t>(crc >> 8U);
+
+  FroniusSmartMeterDecoder decoder;
+  TEST_ASSERT_FALSE(decoder.processFrame(request, sizeof(request), 200));
+  TEST_ASSERT_TRUE(decoder.processFrame(response, sizeof(response), 210));
+
+  const FroniusSmartMeterReading& reading = decoder.reading();
+  TEST_ASSERT_TRUE(reading.phasesValid);
+  TEST_ASSERT_EQUAL_UINT32(210, reading.phasesMeasuredAtMs);
+  TEST_ASSERT_EQUAL_INT32(4067,
+                          reading.phases[0].voltagePhaseToPhaseDecivolts);
+  TEST_ASSERT_EQUAL_INT32(2347, reading.phases[0].voltageDecivolts);
+  TEST_ASSERT_EQUAL_INT32(-3391, reading.phases[0].currentMilliamps);
+  TEST_ASSERT_EQUAL_INT32(-7614, reading.phases[0].realPowerDeciwatts);
+}
+
+void test_fronius_smart_meter_freshness_and_surplus_conversion() {
+  FroniusSmartMeterReading reading;
+  reading.summaryValid = true;
+  reading.summaryMeasuredAtMs = 100;
+
+  TEST_ASSERT_TRUE(isFroniusSmartMeterSummaryFresh(reading, 3100, 3000));
+  TEST_ASSERT_FALSE(isFroniusSmartMeterSummaryFresh(reading, 3101, 3000));
+  reading.summaryMeasuredAtMs = UINT32_MAX - 100U;
+  TEST_ASSERT_TRUE(isFroniusSmartMeterSummaryFresh(reading, 99, 200));
+  TEST_ASSERT_FALSE(isFroniusSmartMeterSummaryFresh(reading, 100, 200));
+
+  TEST_ASSERT_EQUAL_INT32(214, froniusGridPowerToSurplusWatts(-2137));
+  TEST_ASSERT_EQUAL_INT32(-12, froniusGridPowerToSurplusWatts(117));
+  TEST_ASSERT_EQUAL_INT32(0, froniusGridPowerToSurplusWatts(0));
+}
+
 }  // namespace
 
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_starts_disabled_and_safe);
   RUN_TEST(test_automatic_waits_for_measurements);
+  RUN_TEST(test_lost_surplus_measurement_stops_heating_safely);
   RUN_TEST(test_phase_requires_stable_surplus_and_forces_pump);
   RUN_TEST(test_phases_are_added_one_at_a_time);
   RUN_TEST(test_unstable_surplus_restarts_phase_timer);
@@ -432,5 +564,11 @@ int main() {
   RUN_TEST(test_active_low_output_encoding);
   RUN_TEST(test_manual_api_validation);
   RUN_TEST(test_temperature_api_validation);
+  RUN_TEST(test_modbus_crc_accepts_official_request_and_response_examples);
+  RUN_TEST(test_modbus_crc_rejects_corruption_and_short_frames);
+  RUN_TEST(test_fronius_smart_meter_decodes_captured_summary);
+  RUN_TEST(test_fronius_smart_meter_requires_matching_request_and_valid_crc);
+  RUN_TEST(test_fronius_smart_meter_decodes_phase_values);
+  RUN_TEST(test_fronius_smart_meter_freshness_and_surplus_conversion);
   return UNITY_END();
 }

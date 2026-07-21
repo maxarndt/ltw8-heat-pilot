@@ -12,6 +12,7 @@ void Application::begin() {
   }
 
   temperatures_.begin();
+  modbusSniffer_.begin();
   control_.setTemperatureMeasurement(0.0F, false, millis());
 
   log_.println();
@@ -21,8 +22,10 @@ void Application::begin() {
 }
 
 void Application::update(const uint32_t nowMs) {
+  modbusSniffer_.update(nowMs);
   temperatures_.update(nowMs);
   updateTemperatureMeasurement(nowMs);
+  updateSmartMeterMeasurement(nowMs);
   const OutputState before = control_.desiredOutputs();
   control_.update(nowMs);
   if (control_.desiredOutputs() != before && !syncOutputs()) {
@@ -61,7 +64,15 @@ bool Application::setOperatingMode(const OperatingMode mode,
 }
 
 void Application::setSimulatedSurplus(const int32_t surplusW) {
+  simulatedSurplusEnabled_ = true;
   control_.setSurplusMeasurement(surplusW);
+}
+
+void Application::disableSimulatedSurplus(const uint32_t nowMs) {
+  simulatedSurplusEnabled_ = false;
+  lastSmartMeterMeasurementAtMs_ = 0;
+  smartMeterStaleReported_ = false;
+  updateSmartMeterMeasurement(nowMs);
 }
 
 ApplicationStatus Application::status(const uint32_t nowMs) const {
@@ -121,6 +132,35 @@ void Application::updateTemperatureMeasurement(const uint32_t nowMs) {
                                      measuredAtMs);
 }
 
+void Application::updateSmartMeterMeasurement(const uint32_t nowMs) {
+  if (simulatedSurplusEnabled_) {
+    return;
+  }
+
+  const FroniusSmartMeterReading& meter = modbusSniffer_.smartMeterReading();
+  if (!meter.summaryValid) {
+    control_.clearSurplusMeasurement();
+    return;
+  }
+
+  if (!isFroniusSmartMeterSummaryFresh(
+          meter, nowMs, config::modbus::kSmartMeterStaleMs)) {
+    control_.clearSurplusMeasurement();
+    if (!smartMeterStaleReported_) {
+      smartMeterStaleReported_ = true;
+      log_.println("[smart-meter] measurement timed out; surplus invalid");
+    }
+    return;
+  }
+
+  if (meter.summaryMeasuredAtMs != lastSmartMeterMeasurementAtMs_) {
+    lastSmartMeterMeasurementAtMs_ = meter.summaryMeasuredAtMs;
+    smartMeterStaleReported_ = false;
+    control_.setSurplusMeasurement(
+        froniusGridPowerToSurplusWatts(meter.realPowerDeciwatts));
+  }
+}
+
 bool Application::syncOutputs() {
   const OutputState& desired = control_.desiredOutputs();
   if (outputs_.state() == desired) {
@@ -135,7 +175,7 @@ void Application::printStatus(const uint32_t nowMs) const {
       "[status] uptime_ms=%lu mode=%s state=%s heater_phases=%u pump=%u "
       "outputs_healthy=%u manual_timeout_ms=%lu pump_overrun_ms=%lu "
       "phase_change_ms=%lu surplus_w=%ld temperature_c=%.1f inputs_valid=%u "
-      "temperature_valid=%u temperature_fault=%u\n",
+      "temperature_valid=%u temperature_fault=%u surplus_source=%s\n",
       static_cast<unsigned long>(current.uptimeMs), current.mode, current.state,
       current.outputs.heaterPhases, current.outputs.circulationPump,
       current.outputDriverHealthy,
@@ -144,7 +184,14 @@ void Application::printStatus(const uint32_t nowMs) const {
       static_cast<unsigned long>(current.phaseChangeRemainingMs),
       static_cast<long>(current.surplusW), current.temperatureC,
       current.measurementsValid, current.temperatureValid,
-      current.temperatureFault);
+      current.temperatureFault,
+      simulatedSurplusEnabled_
+          ? "simulation"
+          : (isFroniusSmartMeterSummaryFresh(
+                 modbusSniffer_.smartMeterReading(), nowMs,
+                 config::modbus::kSmartMeterStaleMs)
+                 ? "smart_meter"
+                 : "unavailable"));
 }
 
 const char* Application::toString(const OperatingMode mode) {

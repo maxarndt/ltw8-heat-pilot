@@ -40,6 +40,18 @@ constexpr uint32_t kConversionTimeMs = 750;
 constexpr uint32_t kMeasurementIntervalMs = 5000;
 }  // namespace temperature
 
+namespace modbus {
+constexpr int8_t kReceivePin = 18;
+constexpr int8_t kTransmitPin = 17;
+constexpr int8_t kDirectionPin = 21;
+constexpr uint32_t kBaudRate = 9600;
+constexpr uint32_t kFrameGapUs = 4000;
+constexpr uint16_t kMaximumFrameLength = 256;
+constexpr uint8_t kRecentFrameCount = 4;
+constexpr uint32_t kLogIntervalMs = 5000;
+constexpr uint32_t kSmartMeterStaleMs = 3000;
+}  // namespace modbus
+
 namespace ethernet {
 constexpr int8_t kInterruptPin = 12;
 constexpr int8_t kMosiPin = 13;

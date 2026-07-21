@@ -12,6 +12,7 @@ class ControlEngine {
   bool setManualOutput(uint8_t heaterPhases, bool pump, uint32_t nowMs);
   bool setOperatingMode(OperatingMode mode, uint32_t nowMs);
   void setSurplusMeasurement(int32_t surplusW);
+  void clearSurplusMeasurement();
   void setTemperatureMeasurement(float temperatureC, bool valid,
                                  uint32_t nowMs);
   void setFault();

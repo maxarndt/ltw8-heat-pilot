@@ -2,6 +2,7 @@
 
 #include "Application.h"
 #include "HttpApi.h"
+#include "ModbusSniffer.h"
 #include "NetworkService.h"
 #include "OutputController.h"
 #include "TemperatureService.h"
@@ -11,7 +12,8 @@ NetworkService network;
 LogOutput logOutput(network);
 OutputController outputs;
 TemperatureService temperatures(logOutput);
-Application application(logOutput, outputs, temperatures);
+ModbusSniffer modbusSniffer(logOutput);
+Application application(logOutput, outputs, temperatures, modbusSniffer);
 HttpApi httpApi(application, logOutput);
 }
 

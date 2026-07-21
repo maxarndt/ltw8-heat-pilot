@@ -117,6 +117,8 @@ void ControlEngine::setSurplusMeasurement(const int32_t surplusW) {
   surplusValid_ = true;
 }
 
+void ControlEngine::clearSurplusMeasurement() { surplusValid_ = false; }
+
 void ControlEngine::setTemperatureMeasurement(const float temperatureC,
                                               const bool valid,
                                               const uint32_t nowMs) {
