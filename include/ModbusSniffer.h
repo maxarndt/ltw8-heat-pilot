@@ -37,10 +37,15 @@ class ModbusSniffer {
   }
   uint8_t recentFrameCount() const { return recentFrameCount_; }
   const CapturedModbusFrame& recentFrame(uint8_t newestFirstIndex) const;
+  bool hasLastInvalidFrame() const { return hasLastInvalidFrame_; }
+  const CapturedModbusFrame& lastInvalidFrame() const {
+    return lastInvalidFrame_;
+  }
   static void formatHex(const uint8_t* data, size_t length, char* target,
                         size_t targetSize);
 
  private:
+  void extractCompleteFrames(uint32_t nowMs);
   void finishFrame(uint32_t nowMs);
   void storeFrame(uint32_t nowMs, bool crcValid);
   void printSummary(uint32_t nowMs);
@@ -51,6 +56,7 @@ class ModbusSniffer {
   FroniusSmartMeterDecoder smartMeterDecoder_{};
   FroniusBatteryDecoder batteryDecoder_{};
   CapturedModbusFrame recentFrames_[config::modbus::kRecentFrameCount]{};
+  CapturedModbusFrame lastInvalidFrame_{};
   uint8_t receiveBuffer_[config::modbus::kMaximumFrameLength]{};
   uint16_t receiveLength_ = 0;
   uint8_t recentFrameCount_ = 0;
@@ -59,4 +65,5 @@ class ModbusSniffer {
   uint32_t lastLogAtMs_ = 0;
   bool receiving_ = false;
   bool currentFrameOverflow_ = false;
+  bool hasLastInvalidFrame_ = false;
 };

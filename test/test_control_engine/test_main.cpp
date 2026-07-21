@@ -10,6 +10,7 @@
 #include "FroniusBattery.h"
 #include "FroniusSmartMeter.h"
 #include "ModbusRtu.h"
+#include "ModbusRtuFraming.h"
 #include "OutputEncoding.h"
 #include "TemperaturePolicy.h"
 
@@ -512,6 +513,45 @@ void test_modbus_crc_rejects_corruption_and_short_frames() {
   TEST_ASSERT_FALSE(hasValidModbusRtuCrc(frame, 3));
 }
 
+void test_modbus_framing_splits_concatenated_read_request_and_response() {
+  const uint8_t frames[] = {
+      0x01, 0x03, 0x04, 0x00, 0x00, 0x10, 0x45, 0x36,
+      0x01, 0x03, 0x20, 0x00, 0x23, 0x00, 0x00, 0x03, 0x53, 0x00,
+      0x00, 0x00, 0x02, 0x00, 0x00, 0x01, 0x4F, 0x00, 0x00, 0x0C,
+      0xF2, 0x00, 0x00, 0x02, 0x17, 0x00, 0x00, 0x04, 0x59, 0x00,
+      0x00, 0x03, 0x8F, 0x00, 0x00, 0xFB, 0x26};
+
+  TEST_ASSERT_EQUAL_UINT32(8,
+      completeModbusRtuFrameLength(frames, sizeof(frames)));
+  TEST_ASSERT_EQUAL_UINT32(37,
+      completeModbusRtuFrameLength(frames + 8, sizeof(frames) - 8));
+}
+
+void test_modbus_framing_recognizes_write_request_and_response() {
+  const uint8_t request[] = {0x15, 0x10, 0x01, 0xF5, 0x00, 0x01,
+                             0x02, 0x00, 0xFF, 0x1D, 0x75};
+  const uint8_t response[] = {0x15, 0x10, 0x01, 0xF5,
+                              0x00, 0x01, 0x13, 0x13};
+  const uint8_t exception[] = {0x15, 0x83, 0x03, 0x41, 0x35};
+
+  TEST_ASSERT_EQUAL_UINT32(sizeof(request),
+      completeModbusRtuFrameLength(request, sizeof(request)));
+  TEST_ASSERT_EQUAL_UINT32(sizeof(response),
+      completeModbusRtuFrameLength(response, sizeof(response)));
+  TEST_ASSERT_EQUAL_UINT32(sizeof(exception),
+      completeModbusRtuFrameLength(exception, sizeof(exception)));
+}
+
+void test_modbus_framing_waits_for_complete_or_valid_crc() {
+  uint8_t request[] = {0x01, 0x03, 0x01, 0x02,
+                       0x00, 0x10, 0xE4, 0x3A};
+  TEST_ASSERT_EQUAL_UINT32(0,
+      completeModbusRtuFrameLength(request, sizeof(request) - 1U));
+  request[4] ^= 0x01;
+  TEST_ASSERT_EQUAL_UINT32(0,
+      completeModbusRtuFrameLength(request, sizeof(request)));
+}
+
 void test_fronius_smart_meter_decodes_captured_summary() {
   const uint8_t request[] = {0x01, 0x03, 0x01, 0x02,
                              0x00, 0x10, 0xE4, 0x3A};
@@ -677,6 +717,9 @@ int main() {
   RUN_TEST(test_temperature_api_validation);
   RUN_TEST(test_modbus_crc_accepts_official_request_and_response_examples);
   RUN_TEST(test_modbus_crc_rejects_corruption_and_short_frames);
+  RUN_TEST(test_modbus_framing_splits_concatenated_read_request_and_response);
+  RUN_TEST(test_modbus_framing_recognizes_write_request_and_response);
+  RUN_TEST(test_modbus_framing_waits_for_complete_or_valid_crc);
   RUN_TEST(test_fronius_smart_meter_decodes_captured_summary);
   RUN_TEST(test_fronius_smart_meter_requires_matching_request_and_valid_crc);
   RUN_TEST(test_fronius_smart_meter_decodes_phase_values);

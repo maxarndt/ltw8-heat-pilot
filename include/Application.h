@@ -59,6 +59,12 @@ class Application {
   const CapturedModbusFrame& recentModbusFrame(uint8_t index) const {
     return modbusSniffer_.recentFrame(index);
   }
+  bool hasLastInvalidModbusFrame() const {
+    return modbusSniffer_.hasLastInvalidFrame();
+  }
+  const CapturedModbusFrame& lastInvalidModbusFrame() const {
+    return modbusSniffer_.lastInvalidFrame();
+  }
 
  private:
   static constexpr uint32_t kStatusIntervalMs = 2000;

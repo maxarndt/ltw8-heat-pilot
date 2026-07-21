@@ -87,6 +87,19 @@ void HttpApi::handleStatus() {
   sniffer["overflows"] = snifferStats.overflows;
   sniffer["smart_meter_timeouts"] = application_.smartMeterTimeouts();
   sniffer["battery_timeouts"] = application_.batteryTimeouts();
+  if (application_.hasLastInvalidModbusFrame()) {
+    const CapturedModbusFrame& frame = application_.lastInvalidModbusFrame();
+    JsonObject invalid = sniffer["last_invalid_frame"].to<JsonObject>();
+    invalid["captured_at_ms"] = frame.capturedAtMs;
+    invalid["length"] = frame.length;
+    if (frame.length >= 2U) {
+      invalid["unit_id"] = frame.data[0];
+      invalid["function"] = frame.data[1];
+    }
+    char hex[config::modbus::kMaximumFrameLength * 2U + 1U];
+    ModbusSniffer::formatHex(frame.data, frame.length, hex, sizeof(hex));
+    invalid["hex"] = hex;
+  }
 
   JsonObject smartMeter = response["smart_meter"].to<JsonObject>();
   smartMeter["unit_id"] = 1;

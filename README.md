@@ -94,11 +94,16 @@ installation.
 The onboard isolated RS485 interface runs as a strictly receive-only Modbus RTU
 sniffer on GPIO18 at 9600 baud, 8N1. GPIO21 is held in receive mode and no UART
 TX pin is assigned. Sniffer counters and the four most recent frames are exposed
-under `modbus_sniffer` in the status response. The sniffer is diagnostic only;
-captured data does not yet influence control. When attached in parallel to an
-existing bus, termination must match the existing topology. In the current
+under `modbus_sniffer` in the status response. Raw frames are diagnostic; only
+CRC-valid, recognized Smart Meter and battery responses influence control. When
+attached in parallel to an existing bus, termination must match the existing
+topology. In the current
 installation the Heat Pilot replaces a terminated Ohmpilot endpoint, so its
 120-ohm termination remains enabled.
+
+RTU frames are separated using their function-specific length and CRC. The
+inter-frame timing gap remains as a fallback for corrupt or unknown frames, so
+request and response can still be separated after temporary application stalls.
 
 Decoded Fronius Smart Meter TS 65A-3 observations are exposed under
 `smart_meter`. A negative `grid_power_w` means grid export; the corresponding

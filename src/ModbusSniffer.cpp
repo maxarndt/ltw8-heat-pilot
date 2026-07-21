@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include "ModbusRtu.h"
+#include "ModbusRtuFraming.h"
 
 void ModbusSniffer::begin() {
   // Keep the transceiver permanently in receive mode. TX is deliberately not
@@ -28,6 +29,7 @@ void ModbusSniffer::update(const uint32_t nowMs) {
     lastByteAtUs_ = micros();
     if (receiveLength_ < sizeof(receiveBuffer_)) {
       receiveBuffer_[receiveLength_++] = static_cast<uint8_t>(value);
+      extractCompleteFrames(nowMs);
     } else {
       currentFrameOverflow_ = true;
     }
@@ -42,6 +44,24 @@ void ModbusSniffer::update(const uint32_t nowMs) {
     lastLogAtMs_ = nowMs;
     printSummary(nowMs);
   }
+}
+
+void ModbusSniffer::extractCompleteFrames(const uint32_t nowMs) {
+  const size_t frameLength =
+      completeModbusRtuFrameLength(receiveBuffer_, receiveLength_);
+  if (frameLength == 0U) {
+    return;
+  }
+
+  ++stats_.frames;
+  ++stats_.validFrames;
+  receiveLength_ = static_cast<uint16_t>(frameLength);
+  smartMeterDecoder_.processFrame(receiveBuffer_, receiveLength_, nowMs);
+  batteryDecoder_.processFrame(receiveBuffer_, receiveLength_, nowMs);
+  storeFrame(nowMs, true);
+  receiveLength_ = 0;
+  receiving_ = false;
+  currentFrameOverflow_ = false;
 }
 
 const CapturedModbusFrame& ModbusSniffer::recentFrame(
@@ -68,6 +88,10 @@ void ModbusSniffer::formatHex(const uint8_t* data, const size_t length,
 }
 
 void ModbusSniffer::finishFrame(const uint32_t nowMs) {
+  if (receiveLength_ == 0U && !currentFrameOverflow_) {
+    receiving_ = false;
+    return;
+  }
   ++stats_.frames;
   if (currentFrameOverflow_) {
     ++stats_.overflows;
@@ -95,6 +119,10 @@ void ModbusSniffer::storeFrame(const uint32_t nowMs, const bool crcValid) {
   frame.length = receiveLength_;
   frame.crcValid = crcValid;
   std::memcpy(frame.data, receiveBuffer_, receiveLength_);
+  if (!crcValid) {
+    lastInvalidFrame_ = frame;
+    hasLastInvalidFrame_ = true;
+  }
 
   nextFrameIndex_ =
       static_cast<uint8_t>((nextFrameIndex_ + 1U) %
