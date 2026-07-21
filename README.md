@@ -79,6 +79,11 @@ remains available as a recovery path.
 
 ## REST API
 
+Open `http://heat-pilot.local/` for the lightweight, mobile-friendly web
+interface. It shows the current energy, battery, temperature, heater, and pump
+state and allows switching between disabled and automatic mode. Manual output
+and simulation controls deliberately remain API-only.
+
 Read the current state:
 
 ```sh

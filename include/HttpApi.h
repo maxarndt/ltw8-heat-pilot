@@ -14,6 +14,7 @@ class HttpApi {
 
  private:
   void begin();
+  void handleWebUi();
   void handleStatus();
   void handleManualOutput();
   void handleMode();

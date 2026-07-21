@@ -5,6 +5,7 @@
 #include "ApiValidation.h"
 #include "Application.h"
 #include "Config.h"
+#include "WebUi.h"
 
 void HttpApi::update(const bool networkOnline) {
   if (networkOnline && !started_) {
@@ -17,6 +18,7 @@ void HttpApi::update(const bool networkOnline) {
 }
 
 void HttpApi::begin() {
+  server_.on("/", HTTP_GET, [this]() { handleWebUi(); });
   server_.on("/api/v1/status", HTTP_GET, [this]() { handleStatus(); });
   server_.on("/api/v1/manual-output", HTTP_PUT,
              [this]() { handleManualOutput(); });
@@ -29,6 +31,11 @@ void HttpApi::begin() {
   server_.begin();
   started_ = true;
   log_.println("[http] REST API ready on port 80");
+}
+
+void HttpApi::handleWebUi() {
+  server_.sendHeader("Cache-Control", "no-cache");
+  server_.send_P(200, "text/html; charset=utf-8", kWebUiHtml);
 }
 
 void HttpApi::handleStatus() {
@@ -50,6 +57,11 @@ void HttpApi::handleStatus() {
   response["measurements_valid"] = status.measurementsValid;
   response["temperature_valid"] = status.temperatureValid;
   response["temperature_fault"] = status.temperatureFault;
+  response["target_temperature_c"] =
+      config::control::kTargetTemperatureC;
+  response["restart_temperature_c"] =
+      config::control::kTargetTemperatureC -
+      config::control::kTemperatureHysteresisC;
   response["surplus_w"] = status.surplusW;
   const FroniusSmartMeterReading& meter = application_.smartMeterReading();
   const bool smartMeterFresh = isFroniusSmartMeterSummaryFresh(
