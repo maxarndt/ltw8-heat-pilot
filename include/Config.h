@@ -13,6 +13,10 @@ constexpr char kOtaPassword[] = "heat-pilot-dev";
 constexpr uint16_t kLogPort = 23;
 constexpr uint32_t kManualOutputTimeoutMs = 60000;
 
+namespace diagnostics {
+constexpr uint32_t kLoopStallThresholdUs = 100000;
+}  // namespace diagnostics
+
 namespace control {
 constexpr int32_t kHeaterPhasePowerW = 1625;
 constexpr int32_t kPhaseEnableSurplusW = 1700;

@@ -70,12 +70,52 @@ void TelemetryService::update(const bool networkOnline,
   xQueueOverwrite(queue_, &snapshot);
 }
 
-void TelemetryService::observeLoopDuration(const uint32_t durationUs) {
-  if (durationUs > maximumLoopDurationUs_) {
-    maximumLoopDurationUs_ = durationUs;
+void TelemetryService::setResetDiagnostics(const char* reason,
+                                           const MainLoopStage stage) {
+  previousResetReason_ = reason;
+  previousResetStage_ = stage;
+}
+
+void TelemetryService::observeLoopDurations(
+    const uint32_t nowMs, const uint32_t totalUs, const uint32_t networkUs,
+    const uint32_t applicationUs, const uint32_t httpUs,
+    const uint32_t telemetryUs) {
+  maximumLoopDurationUs_ = max(maximumLoopDurationUs_, totalUs);
+  intervalMaximumLoopDurationUs_ =
+      max(intervalMaximumLoopDurationUs_, totalUs);
+  maximumNetworkDurationUs_ = max(maximumNetworkDurationUs_, networkUs);
+  maximumApplicationDurationUs_ =
+      max(maximumApplicationDurationUs_, applicationUs);
+  maximumHttpDurationUs_ = max(maximumHttpDurationUs_, httpUs);
+  maximumTelemetryDurationUs_ =
+      max(maximumTelemetryDurationUs_, telemetryUs);
+  intervalMaximumNetworkDurationUs_ =
+      max(intervalMaximumNetworkDurationUs_, networkUs);
+  intervalMaximumApplicationDurationUs_ =
+      max(intervalMaximumApplicationDurationUs_, applicationUs);
+  intervalMaximumHttpDurationUs_ =
+      max(intervalMaximumHttpDurationUs_, httpUs);
+  intervalMaximumTelemetryDurationUs_ =
+      max(intervalMaximumTelemetryDurationUs_, telemetryUs);
+
+  if (totalUs < config::diagnostics::kLoopStallThresholdUs) {
+    return;
   }
-  if (durationUs > intervalMaximumLoopDurationUs_) {
-    intervalMaximumLoopDurationUs_ = durationUs;
+  ++loopStalls_;
+  lastLoopStallAtMs_ = nowMs;
+  lastLoopStallDurationUs_ = totalUs;
+  lastLoopStallStage_ = MainLoopStage::Network;
+  uint32_t longestStageUs = networkUs;
+  if (applicationUs > longestStageUs) {
+    longestStageUs = applicationUs;
+    lastLoopStallStage_ = MainLoopStage::Application;
+  }
+  if (httpUs > longestStageUs) {
+    longestStageUs = httpUs;
+    lastLoopStallStage_ = MainLoopStage::Http;
+  }
+  if (telemetryUs > longestStageUs) {
+    lastLoopStallStage_ = MainLoopStage::Telemetry;
   }
 }
 
@@ -86,7 +126,35 @@ TelemetryStatus TelemetryService::status() const {
   copy.freeHeapBytes = ESP.getFreeHeap();
   copy.minimumFreeHeapBytes = ESP.getMinFreeHeap();
   copy.maximumLoopDurationUs = maximumLoopDurationUs_;
+  copy.maximumNetworkDurationUs = maximumNetworkDurationUs_;
+  copy.maximumApplicationDurationUs = maximumApplicationDurationUs_;
+  copy.maximumHttpDurationUs = maximumHttpDurationUs_;
+  copy.maximumTelemetryDurationUs = maximumTelemetryDurationUs_;
+  copy.loopStalls = loopStalls_;
+  copy.lastLoopStallAtMs = lastLoopStallAtMs_;
+  copy.lastLoopStallDurationUs = lastLoopStallDurationUs_;
+  copy.lastLoopStallStage = loopStageName(lastLoopStallStage_);
+  copy.previousResetReason = previousResetReason_;
+  copy.previousResetStage = loopStageName(previousResetStage_);
   return copy;
+}
+
+const char* TelemetryService::loopStageName(const MainLoopStage stage) {
+  switch (stage) {
+    case MainLoopStage::Idle:
+      return "idle";
+    case MainLoopStage::Setup:
+      return "setup";
+    case MainLoopStage::Network:
+      return "network";
+    case MainLoopStage::Application:
+      return "application";
+    case MainLoopStage::Http:
+      return "http";
+    case MainLoopStage::Telemetry:
+      return "telemetry";
+  }
+  return "unknown";
 }
 
 void TelemetryService::begin(const uint32_t nowMs) {
@@ -157,6 +225,14 @@ bool TelemetryService::captureSnapshot(const uint32_t nowMs,
   snapshot.freeHeapBytes = telemetryStatus.freeHeapBytes;
   snapshot.minimumFreeHeapBytes = telemetryStatus.minimumFreeHeapBytes;
   snapshot.intervalMaximumLoopDurationUs = intervalMaximumLoopDurationUs_;
+  snapshot.intervalMaximumNetworkDurationUs =
+      intervalMaximumNetworkDurationUs_;
+  snapshot.intervalMaximumApplicationDurationUs =
+      intervalMaximumApplicationDurationUs_;
+  snapshot.intervalMaximumHttpDurationUs = intervalMaximumHttpDurationUs_;
+  snapshot.intervalMaximumTelemetryDurationUs =
+      intervalMaximumTelemetryDurationUs_;
+  snapshot.loopStalls = loopStalls_;
   snapshot.exportSuccesses = telemetryStatus.exportSuccesses;
   snapshot.exportFailures = telemetryStatus.exportFailures;
   snapshot.modbusCrcErrors = modbus.crcErrors;
@@ -187,6 +263,10 @@ bool TelemetryService::captureSnapshot(const uint32_t nowMs,
       intervalMaximumLoopDurationUs_;
   portEXIT_CRITICAL(&statusMux_);
   intervalMaximumLoopDurationUs_ = 0;
+  intervalMaximumNetworkDurationUs_ = 0;
+  intervalMaximumApplicationDurationUs_ = 0;
+  intervalMaximumHttpDurationUs_ = 0;
+  intervalMaximumTelemetryDurationUs_ = 0;
   return true;
 }
 
@@ -290,6 +370,21 @@ String TelemetryService::buildPayload(const Snapshot& snapshot) const {
   addGauge(metrics, "heat_pilot.loop.duration.max", "us",
            "Maximum main-loop duration in the export interval", observedAt,
            snapshot.intervalMaximumLoopDurationUs);
+  addGauge(metrics, "heat_pilot.loop.network.duration.max", "us",
+           "Maximum network-service duration in the export interval",
+           observedAt, snapshot.intervalMaximumNetworkDurationUs);
+  addGauge(metrics, "heat_pilot.loop.application.duration.max", "us",
+           "Maximum application duration in the export interval", observedAt,
+           snapshot.intervalMaximumApplicationDurationUs);
+  addGauge(metrics, "heat_pilot.loop.http.duration.max", "us",
+           "Maximum HTTP-server duration in the export interval", observedAt,
+           snapshot.intervalMaximumHttpDurationUs);
+  addGauge(metrics, "heat_pilot.loop.telemetry.duration.max", "us",
+           "Maximum telemetry-service duration in the export interval",
+           observedAt, snapshot.intervalMaximumTelemetryDurationUs);
+  addSum(metrics, "heat_pilot.loop.stalls", "{stall}",
+         "Main-loop iterations exceeding 100 milliseconds", startedAt,
+         observedAt, snapshot.loopStalls);
   addSum(metrics, "heat_pilot.modbus.crc_errors", "{error}",
          "Modbus frames with invalid CRC", startedAt, observedAt,
          snapshot.modbusCrcErrors);

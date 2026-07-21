@@ -7,6 +7,14 @@
 #include "Config.h"
 
 void NetworkService::begin() {
+  logBuffer_ = xStreamBufferCreate(kLogBufferSize, 1);
+  if (logBuffer_ == nullptr ||
+      xTaskCreatePinnedToCore(logTaskEntry, "network-log",
+                              kLogTaskStackBytes, this, 1, nullptr, 0) !=
+          pdPASS) {
+    Serial.println("[network] failed to start asynchronous log task");
+  }
+
   Network.onEvent([this](const arduino_event_id_t event,
                          const arduino_event_info_t info) {
     handleEvent(event, info);
@@ -33,19 +41,14 @@ void NetworkService::update() {
   }
 
   ArduinoOTA.handle();
-  acceptLogClient();
-
-  if (logClient_ && !logClient_.connected()) {
-    logClient_.stop();
-  }
 }
 
 size_t NetworkService::write(const uint8_t* buffer, const size_t size) {
-  if (!logClient_ || !logClient_.connected()) {
+  if (!logClientConnected_ || logBuffer_ == nullptr) {
     return size;
   }
-
-  logClient_.write(buffer, size);
+  const size_t queued = xStreamBufferSend(logBuffer_, buffer, size, 0);
+  droppedLogBytes_ += static_cast<uint32_t>(size - queued);
   return size;
 }
 
@@ -68,17 +71,17 @@ void NetworkService::handleEvent(const arduino_event_id_t event,
       break;
     case ARDUINO_EVENT_ETH_LOST_IP:
       ethernetOnline_ = false;
+      servicesStarted_ = false;
       Serial.println("[network] ethernet lost IP address");
       break;
     case ARDUINO_EVENT_ETH_DISCONNECTED:
       ethernetOnline_ = false;
+      servicesStarted_ = false;
       Serial.println("[network] ethernet link disconnected");
       break;
     case ARDUINO_EVENT_ETH_STOP:
       ethernetOnline_ = false;
       servicesStarted_ = false;
-      logClient_.stop();
-      logServer_.end();
       Serial.println("[network] ethernet stopped");
       break;
     default:
@@ -102,6 +105,48 @@ void NetworkService::startNetworkServices() {
   Serial.printf("[network] OTA ready; TCP log port=%u\n", config::kLogPort);
 }
 
+void NetworkService::logTaskEntry(void* context) {
+  static_cast<NetworkService*>(context)->logTaskLoop();
+}
+
+void NetworkService::logTaskLoop() {
+  uint8_t buffer[512];
+  while (true) {
+    if (!servicesStarted_) {
+      logClientConnected_ = false;
+      if (logClient_) {
+        logClient_.stop();
+      }
+      if (logBuffer_ != nullptr) {
+        xStreamBufferReset(logBuffer_);
+      }
+      vTaskDelay(pdMS_TO_TICKS(100));
+      continue;
+    }
+
+    acceptLogClient();
+    if (!logClient_ || !logClient_.connected()) {
+      logClientConnected_ = false;
+      if (logClient_) {
+        logClient_.stop();
+      }
+      if (logBuffer_ != nullptr) {
+        xStreamBufferReset(logBuffer_);
+      }
+      vTaskDelay(pdMS_TO_TICKS(20));
+      continue;
+    }
+
+    logClientConnected_ = true;
+    const size_t received = xStreamBufferReceive(
+        logBuffer_, buffer, sizeof(buffer), pdMS_TO_TICKS(20));
+    if (received > 0 && logClient_.write(buffer, received) != received) {
+      logClientConnected_ = false;
+      logClient_.stop();
+    }
+  }
+}
+
 void NetworkService::acceptLogClient() {
   NetworkClient incoming = logServer_.accept();
   if (!incoming) {
@@ -109,10 +154,12 @@ void NetworkService::acceptLogClient() {
   }
 
   if (logClient_) {
+    logClientConnected_ = false;
     logClient_.stop();
   }
 
   logClient_ = incoming;
+  logClientConnected_ = true;
   logClient_.printf("LTW8 Heat Pilot network log\r\n");
   logClient_.printf("IP: %s\r\n", ETH.localIP().toString().c_str());
 }
@@ -126,4 +173,3 @@ size_t LogOutput::write(const uint8_t* buffer, const size_t size) {
   network_.write(buffer, size);
   return size;
 }
-

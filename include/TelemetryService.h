@@ -6,6 +6,15 @@
 
 class Application;
 
+enum class MainLoopStage : uint8_t {
+  Idle,
+  Setup,
+  Network,
+  Application,
+  Http,
+  Telemetry,
+};
+
 struct TelemetryStatus {
   bool started = false;
   bool timeSynchronized = false;
@@ -18,6 +27,16 @@ struct TelemetryStatus {
   uint32_t minimumFreeHeapBytes = 0;
   uint32_t maximumLoopDurationUs = 0;
   uint32_t lastIntervalMaximumLoopDurationUs = 0;
+  uint32_t maximumNetworkDurationUs = 0;
+  uint32_t maximumApplicationDurationUs = 0;
+  uint32_t maximumHttpDurationUs = 0;
+  uint32_t maximumTelemetryDurationUs = 0;
+  uint32_t loopStalls = 0;
+  uint32_t lastLoopStallAtMs = 0;
+  uint32_t lastLoopStallDurationUs = 0;
+  const char* lastLoopStallStage = "none";
+  const char* previousResetReason = "unknown";
+  const char* previousResetStage = "unknown";
 };
 
 class TelemetryService {
@@ -26,8 +45,12 @@ class TelemetryService {
       : application_(application), log_(log) {}
 
   void update(bool networkOnline, uint32_t nowMs);
-  void observeLoopDuration(uint32_t durationUs);
+  void setResetDiagnostics(const char* reason, MainLoopStage stage);
+  void observeLoopDurations(uint32_t nowMs, uint32_t totalUs,
+                            uint32_t networkUs, uint32_t applicationUs,
+                            uint32_t httpUs, uint32_t telemetryUs);
   TelemetryStatus status() const;
+  static const char* loopStageName(MainLoopStage stage);
 
  private:
   struct Snapshot {
@@ -37,6 +60,11 @@ class TelemetryService {
     uint32_t freeHeapBytes = 0;
     uint32_t minimumFreeHeapBytes = 0;
     uint32_t intervalMaximumLoopDurationUs = 0;
+    uint32_t intervalMaximumNetworkDurationUs = 0;
+    uint32_t intervalMaximumApplicationDurationUs = 0;
+    uint32_t intervalMaximumHttpDurationUs = 0;
+    uint32_t intervalMaximumTelemetryDurationUs = 0;
+    uint32_t loopStalls = 0;
     uint32_t exportSuccesses = 0;
     uint32_t exportFailures = 0;
     uint32_t modbusCrcErrors = 0;
@@ -75,6 +103,20 @@ class TelemetryService {
   uint32_t lastQueuedAtMs_ = 0;
   uint32_t maximumLoopDurationUs_ = 0;
   uint32_t intervalMaximumLoopDurationUs_ = 0;
+  uint32_t maximumNetworkDurationUs_ = 0;
+  uint32_t maximumApplicationDurationUs_ = 0;
+  uint32_t maximumHttpDurationUs_ = 0;
+  uint32_t maximumTelemetryDurationUs_ = 0;
+  uint32_t intervalMaximumNetworkDurationUs_ = 0;
+  uint32_t intervalMaximumApplicationDurationUs_ = 0;
+  uint32_t intervalMaximumHttpDurationUs_ = 0;
+  uint32_t intervalMaximumTelemetryDurationUs_ = 0;
+  uint32_t loopStalls_ = 0;
+  uint32_t lastLoopStallAtMs_ = 0;
+  uint32_t lastLoopStallDurationUs_ = 0;
+  MainLoopStage lastLoopStallStage_ = MainLoopStage::Idle;
+  const char* previousResetReason_ = "unknown";
+  MainLoopStage previousResetStage_ = MainLoopStage::Idle;
   uint32_t resultSequence_ = 0;
   uint32_t loggedResultSequence_ = 0;
   bool beginAttempted_ = false;

@@ -2,6 +2,8 @@
 
 #include <Arduino.h>
 #include <Network.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/stream_buffer.h>
 
 class NetworkService {
  public:
@@ -13,12 +15,19 @@ class NetworkService {
  private:
   void handleEvent(arduino_event_id_t event, arduino_event_info_t info);
   void startNetworkServices();
+  static void logTaskEntry(void* context);
+  void logTaskLoop();
   void acceptLogClient();
 
+  static constexpr size_t kLogBufferSize = 4096;
+  static constexpr uint32_t kLogTaskStackBytes = 4096;
   NetworkServer logServer_{23};
   NetworkClient logClient_{};
-  bool ethernetOnline_ = false;
-  bool servicesStarted_ = false;
+  StreamBufferHandle_t logBuffer_ = nullptr;
+  volatile bool ethernetOnline_ = false;
+  volatile bool servicesStarted_ = false;
+  volatile bool logClientConnected_ = false;
+  volatile uint32_t droppedLogBytes_ = 0;
 };
 
 class LogOutput : public Print {

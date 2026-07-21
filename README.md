@@ -62,7 +62,8 @@ pio device monitor --port socket://heat-pilot.local:23
 ```
 
 Only one network log client can be connected at a time. USB logging remains
-available in parallel.
+available in parallel. Network log output is buffered and written by a separate
+task, so a slow or disconnected log client cannot block the control loop.
 
 ## OTA upload
 
@@ -82,7 +83,8 @@ remains available as a recovery path.
 Open `http://heat-pilot.local/` for the lightweight, mobile-friendly web
 interface. It shows the current energy, battery, temperature, heater, and pump
 state and allows switching between disabled and automatic mode. Manual output
-and simulation controls deliberately remain API-only.
+and simulation controls deliberately remain API-only. Status polling permits
+only one in-flight browser request and aborts it after 1.5 seconds.
 
 Read the current state:
 
@@ -134,6 +136,13 @@ continue to use the monotonic `millis()` clock. Export runs in a separate task,
 so an unavailable collector cannot delay control or Modbus processing. The
 status response exposes exporter counters and runtime diagnostics under
 `telemetry` and `diagnostics`.
+
+Runtime diagnostics separately track maximum durations for network,
+application, HTTP, and telemetry processing. Loop iterations above 100 ms are
+counted as stalls. The five-second ESP32 task watchdog resets a blocked main
+loop; the reset reason and active stage are retained and reported after reboot.
+Output initialization now happens immediately at startup without waiting for a
+USB serial connection.
 
 Set the manual outputs (heater phases 0 to 3, pump true or false):
 

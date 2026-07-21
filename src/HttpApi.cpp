@@ -82,6 +82,25 @@ void HttpApi::handleStatus() {
       telemetryStatus.maximumLoopDurationUs;
   diagnostics["last_interval_maximum_loop_duration_us"] =
       telemetryStatus.lastIntervalMaximumLoopDurationUs;
+  diagnostics["maximum_network_duration_us"] =
+      telemetryStatus.maximumNetworkDurationUs;
+  diagnostics["maximum_application_duration_us"] =
+      telemetryStatus.maximumApplicationDurationUs;
+  diagnostics["maximum_http_duration_us"] =
+      telemetryStatus.maximumHttpDurationUs;
+  diagnostics["maximum_telemetry_duration_us"] =
+      telemetryStatus.maximumTelemetryDurationUs;
+  diagnostics["loop_stalls"] = telemetryStatus.loopStalls;
+  diagnostics["last_loop_stall_at_ms"] =
+      telemetryStatus.lastLoopStallAtMs;
+  diagnostics["last_loop_stall_duration_us"] =
+      telemetryStatus.lastLoopStallDurationUs;
+  diagnostics["last_loop_stall_stage"] =
+      telemetryStatus.lastLoopStallStage;
+  diagnostics["previous_reset_reason"] =
+      telemetryStatus.previousResetReason;
+  diagnostics["previous_reset_stage"] =
+      telemetryStatus.previousResetStage;
 
   JsonObject telemetry = response["telemetry"].to<JsonObject>();
   telemetry["started"] = telemetryStatus.started;
