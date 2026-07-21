@@ -39,6 +39,9 @@ void HttpApi::handleStatus() {
   response["mode"] = status.mode;
   response["state"] = status.state;
   response["heater_phases"] = status.outputs.heaterPhases;
+  response["heater_phase_power_w"] = config::control::kHeaterPhasePowerW;
+  response["estimated_heater_energy_wh"] =
+      status.estimatedHeaterEnergyWh;
   response["pump"] = status.outputs.circulationPump;
   response["output_driver_healthy"] = status.outputDriverHealthy;
   response["manual_timeout_remaining_ms"] = status.manualTimeoutRemainingMs;

@@ -14,7 +14,7 @@ constexpr uint16_t kLogPort = 23;
 constexpr uint32_t kManualOutputTimeoutMs = 60000;
 
 namespace control {
-constexpr int32_t kHeaterPhasePowerW = 1500;
+constexpr int32_t kHeaterPhasePowerW = 1625;
 constexpr int32_t kPhaseEnableSurplusW = 1700;
 constexpr int32_t kPhaseDisableSurplusW = 1300;
 constexpr uint32_t kPhaseChangeStableMs = 30000;

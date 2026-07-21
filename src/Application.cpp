@@ -3,8 +3,10 @@
 #include "TemperaturePolicy.h"
 
 void Application::begin() {
+  const uint32_t nowMs = millis();
   control_.begin();
-  if (!outputs_.begin() || !syncOutputs()) {
+  heaterEnergyMeter_.begin(nowMs);
+  if (!outputs_.begin() || !syncOutputs(nowMs)) {
     control_.setFault();
     log_.println("[outputs] failed to initialize TCA9554; state=fault");
   } else {
@@ -22,6 +24,7 @@ void Application::begin() {
 }
 
 void Application::update(const uint32_t nowMs) {
+  heaterEnergyMeter_.update(nowMs, outputs_.state().heaterPhases);
   modbusSniffer_.update(nowMs);
   temperatures_.update(nowMs);
   updateTemperatureMeasurement(nowMs);
@@ -29,7 +32,7 @@ void Application::update(const uint32_t nowMs) {
   updateBatteryMeasurement(nowMs);
   const OutputState before = control_.desiredOutputs();
   control_.update(nowMs);
-  if (control_.desiredOutputs() != before && !syncOutputs()) {
+  if (control_.desiredOutputs() != before && !syncOutputs(nowMs)) {
     control_.setFault();
   }
 
@@ -45,7 +48,7 @@ bool Application::setManualOutput(const uint8_t heaterPhases, const bool pump,
       !control_.setManualOutput(heaterPhases, pump, nowMs)) {
     return false;
   }
-  if (!syncOutputs()) {
+  if (!syncOutputs(nowMs)) {
     control_.setFault();
     return false;
   }
@@ -57,7 +60,7 @@ bool Application::setOperatingMode(const OperatingMode mode,
   if (!outputs_.healthy() || !control_.setOperatingMode(mode, nowMs)) {
     return false;
   }
-  if (!syncOutputs()) {
+  if (!syncOutputs(nowMs)) {
     control_.setFault();
     return false;
   }
@@ -96,6 +99,7 @@ ApplicationStatus Application::status(const uint32_t nowMs) const {
       snapshot.temperatureFault,
       snapshot.surplusW,
       snapshot.temperatureC,
+      heaterEnergyMeter_.wattHours(nowMs),
   };
 }
 
@@ -193,12 +197,16 @@ void Application::updateBatteryMeasurement(const uint32_t nowMs) {
   }
 }
 
-bool Application::syncOutputs() {
+bool Application::syncOutputs(const uint32_t nowMs) {
+  heaterEnergyMeter_.update(nowMs, outputs_.state().heaterPhases);
   const OutputState& desired = control_.desiredOutputs();
   if (outputs_.state() == desired) {
     return true;
   }
-  return outputs_.set(desired.heaterPhases, desired.circulationPump);
+  const bool updated =
+      outputs_.set(desired.heaterPhases, desired.circulationPump);
+  heaterEnergyMeter_.update(nowMs, outputs_.state().heaterPhases);
+  return updated;
 }
 
 void Application::printStatus(const uint32_t nowMs) const {
@@ -207,7 +215,8 @@ void Application::printStatus(const uint32_t nowMs) const {
       "[status] uptime_ms=%lu mode=%s state=%s heater_phases=%u pump=%u "
       "outputs_healthy=%u manual_timeout_ms=%lu pump_overrun_ms=%lu "
       "phase_change_ms=%lu surplus_w=%ld temperature_c=%.1f inputs_valid=%u "
-      "temperature_valid=%u temperature_fault=%u surplus_source=%s\n",
+      "temperature_valid=%u temperature_fault=%u heater_energy_wh=%.3f "
+      "surplus_source=%s\n",
       static_cast<unsigned long>(current.uptimeMs), current.mode, current.state,
       current.outputs.heaterPhases, current.outputs.circulationPump,
       current.outputDriverHealthy,
@@ -216,7 +225,7 @@ void Application::printStatus(const uint32_t nowMs) const {
       static_cast<unsigned long>(current.phaseChangeRemainingMs),
       static_cast<long>(current.surplusW), current.temperatureC,
       current.measurementsValid, current.temperatureValid,
-      current.temperatureFault,
+      current.temperatureFault, current.estimatedHeaterEnergyWh,
       simulatedSurplusEnabled_
           ? "simulation"
           : (isFroniusSmartMeterSummaryFresh(

@@ -2,7 +2,9 @@
 
 #include <Arduino.h>
 
+#include "Config.h"
 #include "ControlEngine.h"
+#include "HeaterEnergyMeter.h"
 #include "ModbusSniffer.h"
 #include "OutputController.h"
 #include "TemperatureService.h"
@@ -21,6 +23,7 @@ struct ApplicationStatus {
   bool temperatureFault;
   int32_t surplusW;
   float temperatureC;
+  double estimatedHeaterEnergyWh;
 };
 
 class Application {
@@ -69,7 +72,7 @@ class Application {
  private:
   static constexpr uint32_t kStatusIntervalMs = 2000;
 
-  bool syncOutputs();
+  bool syncOutputs(uint32_t nowMs);
   void updateTemperatureMeasurement(uint32_t nowMs);
   void updateSmartMeterMeasurement(uint32_t nowMs);
   void updateBatteryMeasurement(uint32_t nowMs);
@@ -91,5 +94,7 @@ class Application {
   OutputController& outputs_;
   TemperatureService& temperatures_;
   ModbusSniffer& modbusSniffer_;
+  HeaterEnergyMeter heaterEnergyMeter_{
+      static_cast<uint32_t>(config::control::kHeaterPhasePowerW)};
   ControlEngine control_{};
 };

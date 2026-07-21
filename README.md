@@ -168,7 +168,8 @@ curl -X PUT http://heat-pilot.local/api/v1/mode \
   -d '{"mode":"automatic"}'
 ```
 
-Control constants are collected in `include/Config.h`: each heater phase is
-1500 W, a phase needs 1700 W to switch on and drops below 1300 W, and a new
+Control constants are collected in `include/Config.h`: each heater phase uses
+the Ohmpilot-derived estimate of 1625 W. A phase needs 1700 W to switch on and
+drops below 1300 W, and a new
 condition must remain stable for 30 seconds. The target temperature is 80 C;
 heating is released again at 76 C. The pump overruns for 90 seconds.

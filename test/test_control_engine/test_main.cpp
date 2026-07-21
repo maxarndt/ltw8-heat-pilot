@@ -9,6 +9,7 @@
 #include "ControlEngine.h"
 #include "FroniusBattery.h"
 #include "FroniusSmartMeter.h"
+#include "HeaterEnergyMeter.h"
 #include "ModbusRtu.h"
 #include "ModbusRtuFraming.h"
 #include "OutputEncoding.h"
@@ -50,6 +51,40 @@ void test_starts_disabled_and_safe() {
   TEST_ASSERT_EQUAL_INT(static_cast<int>(ApplicationState::Disabled),
                         static_cast<int>(status.state));
   assertOutputs(engine, 0, false);
+}
+
+void test_heater_energy_meter_accumulates_active_phases() {
+  HeaterEnergyMeter meter(1625);
+  meter.begin(1000);
+
+  meter.update(2000, 1);
+  TEST_ASSERT_EQUAL_UINT64(0, meter.wattMilliseconds(2000));
+  TEST_ASSERT_EQUAL_UINT64(1625ULL * 1000ULL,
+                           meter.wattMilliseconds(3000));
+
+  meter.update(3000, 2);
+  TEST_ASSERT_EQUAL_UINT64(1625ULL * 3000ULL,
+                           meter.wattMilliseconds(4000));
+
+  meter.update(4000, 0);
+  TEST_ASSERT_EQUAL_UINT64(1625ULL * 3000ULL,
+                           meter.wattMilliseconds(10000));
+}
+
+void test_heater_energy_meter_reports_watt_hours() {
+  HeaterEnergyMeter meter(1625);
+  meter.begin(0, 3);
+
+  TEST_ASSERT_FLOAT_WITHIN(0.001F, 4875.0F,
+                           static_cast<float>(meter.wattHours(3600000)));
+}
+
+void test_heater_energy_meter_handles_millis_wraparound() {
+  HeaterEnergyMeter meter(1625);
+  meter.begin(UINT32_MAX - 999U, 1);
+
+  TEST_ASSERT_EQUAL_UINT64(1625ULL * 1500ULL,
+                           meter.wattMilliseconds(500));
 }
 
 void test_automatic_waits_for_measurements() {
@@ -193,7 +228,10 @@ void test_phases_are_removed_one_at_a_time() {
   engine.update(60001);
   assertOutputs(engine, 2, true);
 
-  engine.setSurplusMeasurement(-201);
+  const int32_t belowDisableThreshold =
+      config::control::kPhaseDisableSurplusW -
+      config::control::kHeaterPhasePowerW - 1;
+  engine.setSurplusMeasurement(belowDisableThreshold);
   engine.update(60002);
   engine.update(90002);
   assertOutputs(engine, 1, true);
@@ -224,12 +262,15 @@ void test_disable_threshold_is_strict_and_stable() {
   engine.update(30000);
   assertOutputs(engine, 1, true);
 
-  engine.setSurplusMeasurement(-200);  // available power is exactly 1300 W
+  const int32_t exactDisableThreshold =
+      config::control::kPhaseDisableSurplusW -
+      config::control::kHeaterPhasePowerW;
+  engine.setSurplusMeasurement(exactDisableThreshold);
   engine.update(30001);
   engine.update(70000);
   assertOutputs(engine, 1, true);
 
-  engine.setSurplusMeasurement(-201);
+  engine.setSurplusMeasurement(exactDisableThreshold - 1);
   engine.update(70001);
   engine.update(100000);
   assertOutputs(engine, 1, true);
@@ -684,6 +725,9 @@ void test_fronius_battery_freshness_handles_wraparound() {
 
 int main() {
   UNITY_BEGIN();
+  RUN_TEST(test_heater_energy_meter_accumulates_active_phases);
+  RUN_TEST(test_heater_energy_meter_reports_watt_hours);
+  RUN_TEST(test_heater_energy_meter_handles_millis_wraparound);
   RUN_TEST(test_starts_disabled_and_safe);
   RUN_TEST(test_automatic_waits_for_measurements);
   RUN_TEST(test_missing_battery_measurement_stops_heating_safely);
